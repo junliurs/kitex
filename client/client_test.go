@@ -1287,6 +1287,81 @@ func Test_initRPCInfoWithStreamClientCallOption(t *testing.T) {
 	test.Assert(t, ri.Config().StreamRecvTimeout() == callOptTimeout)
 }
 
+type streamRecvTimeoutTestProvider struct {
+	recvTimeoutConfig streaming.TimeoutConfig
+	configured        bool
+}
+
+func (p *streamRecvTimeoutTestProvider) Timeouts(ri rpcinfo.RPCInfo) rpcinfo.Timeouts {
+	return ri.Config()
+}
+
+func (p *streamRecvTimeoutTestProvider) ProvideStreamRecvTimeout(rpcinfo.RPCInfo) (streaming.TimeoutConfig, bool) {
+	return p.recvTimeoutConfig, p.configured
+}
+
+func Test_initRPCInfoWithStreamRecvTimeoutProvider(t *testing.T) {
+	const testService = "testService"
+	providerConfig := streaming.TimeoutConfig{Timeout: 2 * time.Second}
+
+	newClient := func(tb *testing.T, provider *streamRecvTimeoutTestProvider, opts ...Option) *kcFinalizerClient {
+		options := []Option{
+			WithTransportProtocol(transport.GRPCStreaming),
+			WithDestService(testService),
+			WithTimeoutProvider(provider),
+		}
+		options = append(options, opts...)
+		cliIntf, err := NewClient(mocks.ServiceInfo(), options...)
+		test.Assert(tb, err == nil, err)
+		return cliIntf.(*kcFinalizerClient)
+	}
+
+	t.Run("not configured", func(t *testing.T) {
+		cli := newClient(t, &streamRecvTimeoutTestProvider{
+			recvTimeoutConfig: providerConfig,
+		})
+		_, ri, _ := cli.initRPCInfo(context.Background(), mocks.MockStreamingMethod, 0, nil, true)
+		test.Assert(t, ri.Config().StreamRecvTimeoutConfig() == (streaming.TimeoutConfig{}), ri.Config())
+	})
+
+	t.Run("provider config", func(t *testing.T) {
+		cli := newClient(t, &streamRecvTimeoutTestProvider{
+			recvTimeoutConfig: providerConfig,
+			configured:        true,
+		})
+		_, ri, _ := cli.initRPCInfo(context.Background(), mocks.MockStreamingMethod, 0, nil, true)
+		test.Assert(t, ri.Config().StreamRecvTimeoutConfig() == providerConfig, ri.Config())
+	})
+
+	t.Run("client option overrides provider", func(t *testing.T) {
+		clientConfig := streaming.TimeoutConfig{
+			Timeout:             3 * time.Second,
+			DisableCancelRemote: true,
+		}
+		cli := newClient(t, &streamRecvTimeoutTestProvider{
+			recvTimeoutConfig: providerConfig,
+			configured:        true,
+		}, WithStreamOptions(WithStreamRecvTimeoutConfig(clientConfig)))
+		_, ri, _ := cli.initRPCInfo(context.Background(), mocks.MockStreamingMethod, 0, nil, true)
+		test.Assert(t, ri.Config().StreamRecvTimeoutConfig() == clientConfig, ri.Config())
+	})
+
+	t.Run("call option overrides client and provider", func(t *testing.T) {
+		callConfig := streaming.TimeoutConfig{Timeout: 4 * time.Second}
+		cli := newClient(t, &streamRecvTimeoutTestProvider{
+			recvTimeoutConfig: providerConfig,
+			configured:        true,
+		}, WithStreamOptions(WithStreamRecvTimeoutConfig(streaming.TimeoutConfig{Timeout: 3 * time.Second})))
+		ctx := NewCtxWithCallOptions(context.Background(), streamcall.GetCallOptions([]streamcall.Option{
+			streamcall.WithRecvTimeoutConfig(callConfig),
+		}))
+		_, ri, callOpts := cli.initRPCInfo(ctx, mocks.MockStreamingMethod, 0, nil, true)
+		defer callOpts.Recycle()
+		test.Assert(t, ri.Config().StreamRecvTimeoutConfig() == callConfig, ri.Config())
+	})
+
+}
+
 func Test_WithStreamEventHandler(t *testing.T) {
 	svcInfo := mocks.ServiceInfo()
 	testService := "testService"

@@ -74,6 +74,12 @@ type TimeoutProvider interface {
 	Timeouts(ri RPCInfo) Timeouts
 }
 
+// StreamRecvTimeoutProvider optionally provides a timeout for each stream Recv call.
+// The bool reports whether a timeout is configured for the RPC.
+type StreamRecvTimeoutProvider interface {
+	ProvideStreamRecvTimeout(ri RPCInfo) (streaming.TimeoutConfig, bool)
+}
+
 type StreamConfig interface {
 	StreamRecvTimeout() time.Duration
 	StreamRecvTimeoutConfig() streaming.TimeoutConfig

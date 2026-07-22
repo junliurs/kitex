@@ -822,6 +822,13 @@ func initRPCInfo(ctx context.Context, method string, opt *client.Options, svcInf
 			_ = cfg.SetConnectTimeout(c.ConnectTimeout())
 			_ = cfg.SetReadWriteTimeout(c.ReadWriteTimeout())
 		}
+		if streamCall {
+			if sp, ok := p.(rpcinfo.StreamRecvTimeoutProvider); ok {
+				if recvTimeoutConfig, configured := sp.ProvideStreamRecvTimeout(ri); configured {
+					cfg.SetStreamRecvTimeoutConfig(recvTimeoutConfig)
+				}
+			}
+		}
 	}
 	sopt := opt.StreamOptions
 	if sopt.RecvTimeout > 0 {
