@@ -41,8 +41,9 @@ func newLongConnTransPool(config LongConnConfig) transPool {
 }
 
 type longConnTransPool struct {
-	transPool *container.ObjectPool
-	config    LongConnConfig
+	transPool             *container.ObjectPool
+	config                LongConnConfig
+	maxReceiveMessageSize int
 }
 
 func (c *longConnTransPool) Get(network, addr string) (trans *transport, err error) {
@@ -62,7 +63,7 @@ func (c *longConnTransPool) Get(network, addr string) (trans *transport, err err
 	if err != nil {
 		return nil, err
 	}
-	trans = newTransport(clientTransport, conn, c)
+	trans = newTransport(clientTransport, conn, c, withMaxReceiveMessageSize(c.maxReceiveMessageSize))
 	// create new transport
 	return trans, nil
 }
@@ -74,4 +75,8 @@ func (c *longConnTransPool) Put(trans *transport) {
 
 func (c *longConnTransPool) Close() {
 	c.transPool.Close()
+}
+
+func (c *longConnTransPool) SetMaxReceiveMessageSize(size int) {
+	c.maxReceiveMessageSize = size
 }

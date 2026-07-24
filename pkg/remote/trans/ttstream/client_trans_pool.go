@@ -27,3 +27,7 @@ type transPool interface {
 	Put(trans *transport)
 	Close()
 }
+
+type maxReceiveMessageSizeSetter interface {
+	SetMaxReceiveMessageSize(size int)
+}

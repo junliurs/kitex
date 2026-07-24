@@ -47,16 +47,17 @@ var (
 )
 
 type muxConnTransList struct {
-	L          sync.RWMutex
-	size       int
-	cursor     uint32
-	transports []*transport
-	pool       transPool
-	closed     int32
-	lastUsed   int64 // unix nano
+	L                     sync.RWMutex
+	size                  int
+	cursor                uint32
+	transports            []*transport
+	pool                  transPool
+	closed                int32
+	lastUsed              int64 // unix nano
+	maxReceiveMessageSize int
 }
 
-func newMuxConnTransList(size int, pool transPool) *muxConnTransList {
+func newMuxConnTransList(size int, pool transPool, maxReceiveMessageSize int) *muxConnTransList {
 	tl := new(muxConnTransList)
 	if size <= 0 {
 		size = runtime.GOMAXPROCS(0)
@@ -64,6 +65,7 @@ func newMuxConnTransList(size int, pool transPool) *muxConnTransList {
 	tl.size = size
 	tl.transports = make([]*transport, size)
 	tl.pool = pool
+	tl.maxReceiveMessageSize = maxReceiveMessageSize
 	return tl
 }
 
@@ -153,7 +155,7 @@ func (tl *muxConnTransList) Get(network, addr string) (*transport, error) {
 		tl.L.Unlock()
 		return nil, err
 	}
-	trans = newTransport(clientTransport, conn, tl.pool)
+	trans = newTransport(clientTransport, conn, tl.pool, withMaxReceiveMessageSize(tl.maxReceiveMessageSize))
 	if atomic.LoadInt32(&tl.closed) == 1 {
 		tl.L.Unlock()
 		_ = trans.Close(nil)
@@ -179,11 +181,12 @@ func newMuxConnTransPool(config MuxConnConfig) transPool {
 }
 
 type muxConnTransPool struct {
-	config      MuxConnConfig
-	pool        sync.Map // addr:*muxConnTransList
-	cleanerOnce int32
-	closed      int32
-	closeCh     chan struct{}
+	config                MuxConnConfig
+	maxReceiveMessageSize int
+	pool                  sync.Map // addr:*muxConnTransList
+	cleanerOnce           int32
+	closed                int32
+	closeCh               chan struct{}
 }
 
 func (p *muxConnTransPool) Get(network, addr string) (trans *transport, err error) {
@@ -194,7 +197,7 @@ func (p *muxConnTransPool) Get(network, addr string) (trans *transport, err erro
 		v, ok := p.pool.Load(addr)
 		if !ok {
 			// multi concurrent Get should get the same TransList object
-			v, _ = p.pool.LoadOrStore(addr, newMuxConnTransList(p.config.PoolSize, p))
+			v, _ = p.pool.LoadOrStore(addr, newMuxConnTransList(p.config.PoolSize, p, p.maxReceiveMessageSize))
 		}
 		if atomic.LoadInt32(&p.closed) == 1 {
 			return nil, errMuxPoolClosed
@@ -209,6 +212,10 @@ func (p *muxConnTransPool) Get(network, addr string) (trans *transport, err erro
 		}
 		// The idle cleaner removed this list from the pool; retry with a fresh list.
 	}
+}
+
+func (p *muxConnTransPool) SetMaxReceiveMessageSize(size int) {
+	p.maxReceiveMessageSize = size
 }
 
 func (p *muxConnTransPool) Put(trans *transport) {
