@@ -59,6 +59,12 @@ func WithClientMuxConnPool(config MuxConnConfig) ClientHandlerOption {
 	}
 }
 
+func WithClientAdaptiveConnPool(config AdaptiveConnConfig) ClientHandlerOption {
+	return func(cp *clientTransHandler) {
+		cp.transPool = newAdaptiveConnTransPool(config)
+	}
+}
+
 // WithClientTraceController configures TraceController to report detailed streaming events
 func WithClientTraceController(traceCtl *rpcinfo.TraceController) ClientHandlerOption {
 	return func(cp *clientTransHandler) {

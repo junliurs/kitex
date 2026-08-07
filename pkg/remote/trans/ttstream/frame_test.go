@@ -21,7 +21,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/gopkg/lang/mcache"
 	"github.com/cloudwego/gopkg/bufiox"
+	gopkgthrift "github.com/cloudwego/gopkg/protocol/thrift"
 
 	"github.com/cloudwego/kitex/internal/test"
 )
@@ -77,6 +79,74 @@ func TestFrameWithoutPayloadCodec(t *testing.T) {
 	err = DecodePayload(context.Background(), payload, wmsg)
 	test.Assert(t, err == nil, err)
 	test.DeepEqual(t, wmsg, rmsg)
+}
+
+func TestEncodeStreamPayload(t *testing.T) {
+	messageAtSize := func(size int) *testRequest {
+		message := &testRequest{A: 1}
+		message.B = string(make([]byte, size-message.BLength()))
+		test.Assert(t, message.BLength() == size, message.BLength())
+		return message
+	}
+	for _, testCase := range []struct {
+		name       string
+		message    *testRequest
+		wantPooled bool
+	}{
+		{
+			name:       "small",
+			message:    &testRequest{A: 1, B: "hello world"},
+			wantPooled: true,
+		},
+		{
+			name:       "pool boundary",
+			message:    messageAtSize(maxPooledStreamPayloadSize),
+			wantPooled: true,
+		},
+		{
+			name:       "above pool boundary",
+			message:    messageAtSize(maxPooledStreamPayloadSize + 1),
+			wantPooled: false,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			want := gopkgthrift.FastMarshal(testCase.message)
+			payload, pooled, err := encodeStreamPayload(
+				context.Background(),
+				testCase.message,
+			)
+			test.Assert(t, err == nil, err)
+			test.Assert(t, pooled == testCase.wantPooled, pooled)
+			test.Assert(t, bytes.Equal(payload, want))
+			if pooled {
+				mcache.Free(payload)
+			}
+		})
+	}
+}
+
+func BenchmarkEncodeStreamPayload(b *testing.B) {
+	message := &testRequest{A: 1, B: string(make([]byte, 1024))}
+
+	b.Run("FastMarshal", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = gopkgthrift.FastMarshal(message)
+		}
+	})
+	b.Run("MCache", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			payload, pooled, err := encodeStreamPayload(
+				context.Background(),
+				message,
+			)
+			if err != nil || !pooled {
+				b.Fatalf("pooled=%t, err=%v", pooled, err)
+			}
+			mcache.Free(payload)
+		}
+	})
 }
 
 func TestPayloadCodec(t *testing.T) {

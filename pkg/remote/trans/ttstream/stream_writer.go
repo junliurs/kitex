@@ -22,6 +22,7 @@ var (
 )
 
 type streamWriter interface {
+	// WriteFrame must finish consuming f.payload before it returns.
 	WriteFrame(f *Frame) error
 	CloseStream(sid int32) error
 }

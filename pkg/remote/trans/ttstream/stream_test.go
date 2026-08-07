@@ -19,16 +19,48 @@
 package ttstream
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	gopkgthrift "github.com/cloudwego/gopkg/protocol/thrift"
 
 	"github.com/cloudwego/kitex/internal/test"
 	"github.com/cloudwego/kitex/pkg/kerrors"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
 	"github.com/cloudwego/kitex/pkg/streaming"
 )
+
+func TestStreamSendMsgConsumesPayloadSynchronously(t *testing.T) {
+	message := &testRequest{A: 1, B: "hello world"}
+	want := gopkgthrift.FastMarshal(message)
+	for _, testCase := range []struct {
+		name     string
+		writeErr error
+	}{
+		{name: "success"},
+		{name: "error", writeErr: errors.New("write failed")},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			writer := mockStreamWriter{
+				writeFrameFunc: func(frame *Frame) error {
+					test.Assert(t, frame.typ == dataFrameType, frame.typ)
+					test.Assert(t, bytes.Equal(frame.payload, want))
+					return testCase.writeErr
+				},
+			}
+			stream := newBasicStream(context.Background(), writer, streamFrame{
+				sid:    1,
+				method: "method",
+			})
+
+			err := stream.SendMsg(context.Background(), message)
+			test.Assert(t, err == testCase.writeErr, err)
+		})
+	}
+}
 
 func TestGenericStreaming(t *testing.T) {
 	cs, ss, err := newTestStreamPipe(testServiceInfo, "Bidi")

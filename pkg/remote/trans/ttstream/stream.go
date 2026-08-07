@@ -118,7 +118,7 @@ func (s *stream) TransportProtocol() ktransport.Protocol {
 // here, and the context passed in by the user is ignored.
 func (s *stream) SendMsg(ctx context.Context, msg any) (err error) {
 	// encode payload
-	payload, err := EncodePayload(s.ctx, msg)
+	payload, pooled, err := encodeStreamPayload(s.ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,11 @@ func (s *stream) SendMsg(ctx context.Context, msg any) (err error) {
 		}
 	}
 	// send data frame
-	return s.writeFrame(dataFrameType, nil, nil, payload)
+	err = s.writeFrame(dataFrameType, nil, nil, payload)
+	if err == nil && pooled {
+		mcache.Free(payload)
+	}
+	return err
 }
 
 func (s *stream) RecvMsg(ctx context.Context, data any) error {

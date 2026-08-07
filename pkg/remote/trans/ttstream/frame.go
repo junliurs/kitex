@@ -41,6 +41,8 @@ const (
 	dataFrameType    int32 = 3
 	trailerFrameType int32 = 4
 	rstFrameType     int32 = 5
+
+	maxPooledStreamPayloadSize = 64 * 1024
 )
 
 var frameTypeToString = map[int32]string{
@@ -224,6 +226,20 @@ func EncodePayload(ctx context.Context, msg any) ([]byte, error) {
 	default:
 		return nil, errInvalidMessage
 	}
+}
+
+func encodeStreamPayload(ctx context.Context, msg any) (payload []byte, pooled bool, err error) {
+	if codec, ok := msg.(gopkgthrift.FastCodec); ok {
+		size := codec.BLength()
+		if size > maxPooledStreamPayloadSize {
+			return gopkgthrift.FastMarshal(codec), false, nil
+		}
+		payload = mcache.Malloc(size)
+		codec.FastWriteNocopy(payload, nil)
+		return payload, true, nil
+	}
+	payload, err = EncodePayload(ctx, msg)
+	return payload, false, err
 }
 
 func DecodePayload(ctx context.Context, payload []byte, msg any) error {

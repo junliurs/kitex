@@ -45,12 +45,10 @@ type clientTransport struct {
 	pool    transPool
 	streams sync.Map // key=streamID val=clientStream
 
-	mu        sync.Mutex // protect state, closedErr and writer
-	state     int32
-	closedErr error
-	writer    *writerBuffer
+	writer *coalescingWriter
 
 	closedTrigger chan struct{}
+	poolStreams   int32
 }
 
 func newClientTransport(conn netpoll.Connection, pool transPool) *clientTransport {
@@ -60,7 +58,7 @@ func newClientTransport(conn netpoll.Connection, pool transPool) *clientTranspor
 		conn:          conn,
 		pool:          pool,
 		streams:       sync.Map{},
-		writer:        newWriterBuffer(conn.Writer()),
+		writer:        newCoalescingWriter(newWriterBuffer(conn.Writer())),
 		closedTrigger: make(chan struct{}, 1),
 	}
 	addr := ""
@@ -97,25 +95,14 @@ func (t *clientTransport) Addr() net.Addr {
 // when an exception is encountered and the transport needs to be closed,
 // the exception is not nil and the currently surviving streams are aware of this exception.
 func (t *clientTransport) Close(exception error) error {
-	t.mu.Lock()
-	if t.state == connStateClosed {
-		closedErr := t.closedErr
-		t.mu.Unlock()
+	closeOwner, closedErr := t.writer.Close(exception)
+	if !closeOwner {
 		return closedErr
 	}
-	t.setClosedStateLocked(exception)
-	t.mu.Unlock()
 
-	t.releaseResources(exception)
+	t.releaseResources(closedErr)
 
-	return exception
-}
-
-// setClosedStateLocked sets the closed state and closed reason.
-// Must be called with t.mu held.
-func (t *clientTransport) setClosedStateLocked(err error) {
-	t.state = connStateClosed
-	t.closedErr = err
+	return closedErr
 }
 
 func (t *clientTransport) releaseResources(err error) {
@@ -141,10 +128,7 @@ func (t *clientTransport) WaitClosed() {
 }
 
 func (t *clientTransport) IsActive() bool {
-	t.mu.Lock()
-	isClosed := t.state == connStateClosed
-	t.mu.Unlock()
-	return !isClosed && t.conn.IsActive()
+	return !t.writer.IsClosed() && t.conn.IsActive()
 }
 
 func (t *clientTransport) storeStream(s *clientStream) {
@@ -216,27 +200,11 @@ func (t *clientTransport) loopRead() error {
 
 // WriteFrame is concurrent safe
 func (t *clientTransport) WriteFrame(fr *Frame) (err error) {
-	var needRelease bool
-	t.mu.Lock()
-	defer func() {
-		t.mu.Unlock()
-		if needRelease {
-			t.releaseResources(err)
-		}
-	}()
-	if t.state == connStateClosed {
-		err = t.closedErr
-		return err
+	err, closeOwner := t.writer.WriteFrame(fr)
+	if closeOwner {
+		t.releaseResources(err)
 	}
-
-	if err = encodeFrameAndFlush(context.Background(), t.writer, fr); err != nil {
-		t.setClosedStateLocked(err)
-		needRelease = true
-		return err
-	}
-	recycleFrame(fr)
-
-	return nil
+	return err
 }
 
 func (t *clientTransport) CloseStream(sid int32) (err error) {
