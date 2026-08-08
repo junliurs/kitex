@@ -58,9 +58,14 @@ func newClientTransport(conn netpoll.Connection, pool transPool) *clientTranspor
 		conn:          conn,
 		pool:          pool,
 		streams:       sync.Map{},
-		writer:        newCoalescingWriter(newWriterBuffer(conn.Writer())),
 		closedTrigger: make(chan struct{}, 1),
 	}
+	t.writer = newCoalescingWriter(
+		newWriterBuffer(conn.Writer()),
+		func() int32 {
+			return atomic.LoadInt32(&t.poolStreams)
+		},
+	)
 	addr := ""
 	if t.Addr() != nil {
 		addr = t.Addr().String()

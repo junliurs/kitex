@@ -13,7 +13,7 @@ import (
 )
 
 var DefaultAdaptiveConnConfig = AdaptiveConnConfig{
-	MaxConnections: runtime.GOMAXPROCS(0) * 2,
+	MaxConnections: runtime.GOMAXPROCS(0) * 10 / 8,
 	MaxIdleTimeout: time.Minute,
 }
 

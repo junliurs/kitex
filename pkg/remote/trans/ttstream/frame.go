@@ -94,6 +94,35 @@ func recycleFrame(frame *Frame) {
 // EncodeFrame will not call Flush!
 func EncodeFrame(ctx context.Context, writer bufiox.Writer, fr *Frame) (err error) {
 	written := writer.WrittenLen()
+	var totalLenField []byte
+	if fr.typ == dataFrameType && fr.meta == nil {
+		totalLenField, err = encodeDataFrameHeader(writer, fr)
+	} else {
+		totalLenField, err = encodeFrameHeader(ctx, writer, fr)
+	}
+	if err != nil {
+		return err
+	}
+	if len(fr.payload) > 0 {
+		if nw, ok := writer.(gopkgthrift.NocopyWriter); ok {
+			err = nw.WriteDirect(fr.payload, 0)
+		} else {
+			_, err = writer.WriteBinary(fr.payload)
+		}
+		if err != nil {
+			return errTransport.newBuilder().withCause(err)
+		}
+	}
+	written = writer.WrittenLen() - written
+	binary.BigEndian.PutUint32(totalLenField, uint32(written-4))
+	return nil
+}
+
+func encodeFrameHeader(
+	ctx context.Context,
+	writer bufiox.Writer,
+	fr *Frame,
+) ([]byte, error) {
 	param := ttheader.EncodeParam{
 		Flags:      ttheader.HeaderFlagsStreaming,
 		SeqID:      fr.sid,
@@ -116,21 +145,58 @@ func EncodeFrame(ctx context.Context, writer bufiox.Writer, fr *Frame) (err erro
 
 	totalLenField, err := ttheader.Encode(ctx, param, writer)
 	if err != nil {
-		return errIllegalFrame.newBuilder().withCause(err)
+		return nil, errIllegalFrame.newBuilder().withCause(err)
 	}
-	if len(fr.payload) > 0 {
-		if nw, ok := writer.(gopkgthrift.NocopyWriter); ok {
-			err = nw.WriteDirect(fr.payload, 0)
-		} else {
-			_, err = writer.WriteBinary(fr.payload)
-		}
-		if err != nil {
-			return errTransport.newBuilder().withCause(err)
-		}
+	return totalLenField, nil
+}
+
+func encodeDataFrameHeader(
+	writer bufiox.Writer,
+	fr *Frame,
+) ([]byte, error) {
+	methodLength := len(fr.method)
+	if methodLength > int(^uint16(0)) {
+		return nil, errIllegalFrame.newBuilder().withCause(
+			fmt.Errorf("method exceeded %dB max size: %d", ^uint16(0), methodLength),
+		)
 	}
-	written = writer.WrittenLen() - written
-	binary.BigEndian.PutUint32(totalLenField, uint32(written-4))
-	return nil
+	headerInfoSize := 14 + methodLength
+	padding := (4 - headerInfoSize%4) % 4
+	headerInfoSize += padding
+	buffer, err := writer.Malloc(ttheader.TTHeaderMetaSize + headerInfoSize)
+	if err != nil {
+		return nil, errIllegalFrame.newBuilder().withCause(err)
+	}
+	totalLenField := buffer[:4]
+	binary.BigEndian.PutUint32(
+		buffer[4:8],
+		ttheader.TTHeaderMagic+uint32(ttheader.HeaderFlagsStreaming),
+	)
+	binary.BigEndian.PutUint32(buffer[8:12], uint32(fr.sid))
+	binary.BigEndian.PutUint16(buffer[12:14], uint16(headerInfoSize/4))
+
+	offset := ttheader.TTHeaderMetaSize
+	buffer[offset] = byte(ttheader.ProtocolIDThriftStruct)
+	buffer[offset+1] = 0
+	offset += 2
+	buffer[offset] = byte(ttheader.InfoIDIntKeyValue)
+	binary.BigEndian.PutUint16(buffer[offset+1:offset+3], 2)
+	offset += 3
+	binary.BigEndian.PutUint16(buffer[offset:offset+2], ttheader.FrameType)
+	binary.BigEndian.PutUint16(buffer[offset+2:offset+4], 1)
+	buffer[offset+4] = ttheader.FrameTypeData[0]
+	offset += 5
+	binary.BigEndian.PutUint16(buffer[offset:offset+2], ttheader.ToMethod)
+	binary.BigEndian.PutUint16(
+		buffer[offset+2:offset+4],
+		uint16(methodLength),
+	)
+	copy(buffer[offset+4:offset+4+methodLength], fr.method)
+	offset += 4 + methodLength
+	for index := 0; index < padding; index++ {
+		buffer[offset+index] = 0
+	}
+	return totalLenField, nil
 }
 
 func DecodeFrame(ctx context.Context, reader bufiox.Reader) (fr *Frame, err error) {

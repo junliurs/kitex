@@ -20,6 +20,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cloudwego/gopkg/bufiox"
 	"github.com/cloudwego/netpoll"
@@ -40,6 +41,7 @@ type serverTransport struct {
 	writer *coalescingWriter
 
 	closedTrigger chan struct{}
+	activeStreams int32
 }
 
 func newServerTransport(conn netpoll.Connection) *serverTransport {
@@ -51,9 +53,14 @@ func newServerTransport(conn netpoll.Connection) *serverTransport {
 		// serverTransport does not have related ctx to control lifecycle, using context.Background() is okay
 		spipe:         container.NewPipe[*serverStream](context.Background(), nil),
 		scache:        make([]*serverStream, 0, streamCacheSize),
-		writer:        newCoalescingWriter(newWriterBuffer(conn.Writer())),
 		closedTrigger: make(chan struct{}, 1),
 	}
+	t.writer = newServerCoalescingWriter(
+		newWriterBuffer(conn.Writer()),
+		func() int32 {
+			return atomic.LoadInt32(&t.activeStreams)
+		},
+	)
 	addr := ""
 	if t.Addr() != nil {
 		addr = t.Addr().String()
@@ -123,6 +130,7 @@ func (t *serverTransport) IsActive() bool {
 
 func (t *serverTransport) storeStream(s *serverStream) {
 	t.streams.Store(s.sid, s)
+	atomic.AddInt32(&t.activeStreams, 1)
 }
 
 func (t *serverTransport) loadStream(sid int32) (s *serverStream, ok bool) {
@@ -136,7 +144,9 @@ func (t *serverTransport) loadStream(sid int32) (s *serverStream, ok bool) {
 
 func (t *serverTransport) deleteStream(sid int32) {
 	// remove stream from transport
-	t.streams.Delete(sid)
+	if _, loaded := t.streams.LoadAndDelete(sid); loaded {
+		atomic.AddInt32(&t.activeStreams, -1)
+	}
 }
 
 func (t *serverTransport) readFrame(reader bufiox.Reader) error {

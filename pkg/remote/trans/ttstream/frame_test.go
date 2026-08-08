@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/gopkg/lang/mcache"
 	"github.com/cloudwego/gopkg/bufiox"
 	gopkgthrift "github.com/cloudwego/gopkg/protocol/thrift"
+	"github.com/cloudwego/gopkg/protocol/ttheader"
 
 	"github.com/cloudwego/kitex/internal/test"
 )
@@ -66,6 +67,125 @@ func TestFrameCodec(t *testing.T) {
 		test.Assert(t, err == nil, err)
 		test.DeepEqual(t, string(wframe.payload), string(rframe.payload))
 		test.DeepEqual(t, wframe.header, rframe.header)
+	}
+}
+
+func TestDataFrameFastHeaderCompatible(t *testing.T) {
+	var buffer []byte
+	writer := bufiox.NewBytesWriter(&buffer)
+	frame := newFrame(
+		streamFrame{sid: 123, method: "BidiStreaming"},
+		dataFrameType,
+		[]byte("payload"),
+	)
+	err := EncodeFrame(context.Background(), writer, frame)
+	test.Assert(t, err == nil, err)
+	err = writer.Flush()
+	test.Assert(t, err == nil, err)
+
+	reader := bufiox.NewBytesReader(buffer)
+	decoded, err := DecodeFrame(context.Background(), reader)
+	test.Assert(t, err == nil, err)
+	test.Assert(t, decoded.sid == frame.sid, decoded.sid)
+	test.Assert(t, decoded.method == frame.method, decoded.method)
+	test.Assert(t, decoded.typ == dataFrameType, decoded.typ)
+	test.Assert(t, bytes.Equal(decoded.payload, frame.payload))
+	mcache.Free(decoded.payload)
+	recycleFrame(decoded)
+	recycleFrame(frame)
+}
+
+func TestDataFrameWithMetadataUsesGenericHeader(t *testing.T) {
+	var buffer []byte
+	writer := bufiox.NewBytesWriter(&buffer)
+	frame := newFrame(
+		streamFrame{
+			sid:    123,
+			method: "BidiStreaming",
+			meta: IntHeader{
+				ttheader.LogID: "log-id",
+			},
+		},
+		dataFrameType,
+		[]byte("payload"),
+	)
+	err := EncodeFrame(context.Background(), writer, frame)
+	test.Assert(t, err == nil, err)
+	err = writer.Flush()
+	test.Assert(t, err == nil, err)
+
+	reader := bufiox.NewBytesReader(buffer)
+	decoded, err := DecodeFrame(context.Background(), reader)
+	test.Assert(t, err == nil, err)
+	test.Assert(t, decoded.meta[ttheader.LogID] == "log-id", decoded.meta)
+	test.Assert(t, decoded.method == frame.method, decoded.method)
+	test.Assert(t, decoded.typ == dataFrameType, decoded.typ)
+	mcache.Free(decoded.payload)
+	recycleFrame(decoded)
+	recycleFrame(frame)
+}
+
+type frameBenchmarkWriter struct {
+	buffer []byte
+}
+
+func (w *frameBenchmarkWriter) Malloc(size int) ([]byte, error) {
+	start := len(w.buffer)
+	w.buffer = append(w.buffer, make([]byte, size)...)
+	return w.buffer[start:], nil
+}
+
+func (w *frameBenchmarkWriter) WriteBinary(value []byte) (int, error) {
+	w.buffer = append(w.buffer, value...)
+	return len(value), nil
+}
+
+func (w *frameBenchmarkWriter) WrittenLen() int {
+	return len(w.buffer)
+}
+
+func (w *frameBenchmarkWriter) Flush() error {
+	w.buffer = w.buffer[:0]
+	return nil
+}
+
+func BenchmarkEncodeDataFrameHeader(b *testing.B) {
+	for _, testCase := range []struct {
+		name string
+		meta IntHeader
+	}{
+		{name: "fast"},
+		{
+			name: "generic",
+			meta: IntHeader{},
+		},
+	} {
+		b.Run(testCase.name, func(b *testing.B) {
+			writer := &frameBenchmarkWriter{
+				buffer: make([]byte, 0, 2048),
+			}
+			frame := newFrame(
+				streamFrame{
+					sid:    123,
+					method: "BidiStreaming",
+					meta:   testCase.meta,
+				},
+				dataFrameType,
+				make([]byte, 1024),
+			)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				writer.buffer = writer.buffer[:0]
+				if err := EncodeFrame(
+					context.Background(),
+					writer,
+					frame,
+				); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

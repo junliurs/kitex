@@ -2,6 +2,7 @@ package ttstream
 
 import (
 	"context"
+	"runtime"
 	"sync"
 
 	"github.com/cloudwego/gopkg/bufiox"
@@ -9,9 +10,19 @@ import (
 )
 
 const (
-	maxCoalescedFrames       = 16
-	maxCoalescedPayloadBytes = 256 * 1024
-	maxPendingFrames         = maxCoalescedFrames - 1
+	maxCoalescedFrames           = 16
+	maxCoalescedPayloadBytes     = 256 * 1024
+	maxPendingFrames             = maxCoalescedFrames - 1
+	maxImmediateFlushBytes       = 4 * 1024
+	defaultMinGroupCommitStreams = 3
+	defaultGroupCommitYields     = 1
+	defaultGroupCommitPending    = 1
+	serverMidGroupCommitStreams  = 4
+	serverMidGroupCommitYields   = 4
+	serverMidGroupCommitPending  = 2
+	serverHighGroupCommitStreams = 5
+	serverHighGroupCommitYields  = 8
+	serverHighGroupCommitPending = 3
 )
 
 type frameWriteResult struct {
@@ -47,7 +58,18 @@ type coalescingWriter struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 
-	writer bufiox.Writer
+	writer                 bufiox.Writer
+	activeStreamCount      func() int32
+	groupCommitYield       func()
+	minGroupCommitStreams  int32
+	maxGroupCommitYields   int
+	groupCommitPending     int
+	midGroupCommitStreams  int32
+	midGroupCommitYields   int
+	midGroupCommitPending  int
+	highGroupCommitStreams int32
+	highGroupCommitYields  int
+	highGroupCommitPending int
 
 	state     int32
 	closing   bool
@@ -61,12 +83,66 @@ type coalescingWriter struct {
 	waiters      int
 }
 
-func newCoalescingWriter(writer bufiox.Writer) *coalescingWriter {
+func newCoalescingWriter(
+	writer bufiox.Writer,
+	activeStreamCounts ...func() int32,
+) *coalescingWriter {
+	return newCoalescingWriterWithYields(
+		writer,
+		defaultMinGroupCommitStreams,
+		defaultGroupCommitYields,
+		defaultGroupCommitPending,
+		activeStreamCounts...,
+	)
+}
+
+func newCoalescingWriterWithYields(
+	writer bufiox.Writer,
+	minGroupCommitStreams int32,
+	maxGroupCommitYields int,
+	groupCommitPending int,
+	activeStreamCounts ...func() int32,
+) *coalescingWriter {
+	var activeStreamCount func() int32
+	if len(activeStreamCounts) > 0 {
+		activeStreamCount = activeStreamCounts[0]
+	}
+	if maxGroupCommitYields < 0 {
+		maxGroupCommitYields = 0
+	}
+	if minGroupCommitStreams < 1 {
+		minGroupCommitStreams = 1
+	}
+	if groupCommitPending < 1 {
+		groupCommitPending = 1
+	}
+	if groupCommitPending > maxPendingFrames {
+		groupCommitPending = maxPendingFrames
+	}
 	value := &coalescingWriter{
-		writer:  writer,
-		pending: make([]*pendingFrameWrite, 0, maxPendingFrames),
+		writer:                writer,
+		activeStreamCount:     activeStreamCount,
+		groupCommitYield:      runtime.Gosched,
+		minGroupCommitStreams: minGroupCommitStreams,
+		maxGroupCommitYields:  maxGroupCommitYields,
+		groupCommitPending:    groupCommitPending,
+		pending:               make([]*pendingFrameWrite, 0, maxPendingFrames),
 	}
 	value.cond = sync.NewCond(&value.mu)
+	return value
+}
+
+func newServerCoalescingWriter(
+	writer bufiox.Writer,
+	activeStreamCount func() int32,
+) *coalescingWriter {
+	value := newCoalescingWriter(writer, activeStreamCount)
+	value.midGroupCommitStreams = serverMidGroupCommitStreams
+	value.midGroupCommitYields = serverMidGroupCommitYields
+	value.midGroupCommitPending = serverMidGroupCommitPending
+	value.highGroupCommitStreams = serverHighGroupCommitStreams
+	value.highGroupCommitYields = serverHighGroupCommitYields
+	value.highGroupCommitPending = serverHighGroupCommitPending
 	return value
 }
 
@@ -128,6 +204,11 @@ func (w *coalescingWriter) writeAsLeader(
 
 	err = EncodeFrame(context.Background(), w.writer, leader.frame)
 	if err == nil {
+		maxYields, targetPending := w.groupCommitLimits()
+		for attempts := 0; attempts < maxYields &&
+			w.shouldYieldForBatch(targetPending); attempts++ {
+			w.groupCommitYield()
+		}
 		w.mu.Lock()
 		for len(w.pending) > 0 && len(batch) < maxCoalescedFrames {
 			request := w.pending[0]
@@ -199,6 +280,47 @@ func (w *coalescingWriter) writeAsLeader(
 		nextLeader.done <- frameWriteResult{leader: true}
 	}
 	return err, closeOwner
+}
+
+func (w *coalescingWriter) groupCommitLimits() (
+	maxYields,
+	targetPending int,
+) {
+	if w.activeStreamCount == nil {
+		return 0, 0
+	}
+	activeStreams := w.activeStreamCount()
+	if activeStreams < w.minGroupCommitStreams {
+		return 0, 0
+	}
+	maxYields = w.maxGroupCommitYields
+	targetPending = w.groupCommitPending
+	if w.midGroupCommitStreams > 0 &&
+		activeStreams >= w.midGroupCommitStreams {
+		maxYields = w.midGroupCommitYields
+		targetPending = w.midGroupCommitPending
+	}
+	if w.highGroupCommitStreams > 0 &&
+		activeStreams >= w.highGroupCommitStreams {
+		maxYields = w.highGroupCommitYields
+		targetPending = w.highGroupCommitPending
+	}
+	if maximum := int(activeStreams) - 1; targetPending > maximum {
+		targetPending = maximum
+	}
+	return maxYields, targetPending
+}
+
+func (w *coalescingWriter) shouldYieldForBatch(targetPending int) bool {
+	if w.activeStreamCount == nil ||
+		targetPending < 1 ||
+		w.writer.WrittenLen() >= maxImmediateFlushBytes {
+		return false
+	}
+	w.mu.Lock()
+	pending := len(w.pending)
+	w.mu.Unlock()
+	return pending < targetPending
 }
 
 func (w *coalescingWriter) Close(err error) (closeOwner bool, closedErr error) {

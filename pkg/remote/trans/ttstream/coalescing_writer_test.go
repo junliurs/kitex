@@ -114,6 +114,287 @@ func TestCoalescingWriterFlushesConcurrentFramesTogether(t *testing.T) {
 	}
 }
 
+func TestCoalescingWriterYieldForSharedSmallBatch(t *testing.T) {
+	writer := newBlockingProfileWriter()
+	writer.buffer = make([]byte, maxImmediateFlushBytes-1)
+	activeStreams := int32(defaultMinGroupCommitStreams)
+	coalescer := newCoalescingWriter(
+		writer,
+		func() int32 {
+			return atomic.LoadInt32(&activeStreams)
+		},
+	)
+	maxYields, targetPending := coalescer.groupCommitLimits()
+	if maxYields != defaultGroupCommitYields ||
+		targetPending != defaultGroupCommitPending {
+		t.Fatalf(
+			"group commit limits=(%d,%d), want (%d,%d)",
+			maxYields,
+			targetPending,
+			defaultGroupCommitYields,
+			defaultGroupCommitPending,
+		)
+	}
+	if !coalescer.shouldYieldForBatch(targetPending) {
+		t.Fatal("shared small batch did not request group commit")
+	}
+
+	atomic.StoreInt32(&activeStreams, defaultMinGroupCommitStreams-1)
+	maxYields, targetPending = coalescer.groupCommitLimits()
+	if maxYields != 0 || targetPending != 0 {
+		t.Fatalf(
+			"below-threshold limits=(%d,%d), want (0,0)",
+			maxYields,
+			targetPending,
+		)
+	}
+	if coalescer.shouldYieldForBatch(targetPending) {
+		t.Fatal("connection below the group-commit threshold yielded")
+	}
+
+	atomic.StoreInt32(&activeStreams, defaultMinGroupCommitStreams)
+	_, targetPending = coalescer.groupCommitLimits()
+	writer.buffer = make([]byte, maxImmediateFlushBytes)
+	if coalescer.shouldYieldForBatch(targetPending) {
+		t.Fatal("large batch yielded")
+	}
+
+	writer.buffer = writer.buffer[:0]
+	coalescer.pending = append(
+		coalescer.pending,
+		acquirePendingFrameWrite(newFrame(
+			streamFrame{sid: 1, method: "Test"},
+			dataFrameType,
+			nil,
+		)),
+	)
+	defer func() {
+		request := coalescer.pending[0]
+		coalescer.pending = coalescer.pending[:0]
+		recycleFrame(request.frame)
+		releasePendingFrameWrite(request)
+	}()
+	if coalescer.shouldYieldForBatch(targetPending) {
+		t.Fatal("writer with an existing pending frame yielded")
+	}
+
+	withoutCounter := newCoalescingWriter(writer)
+	_, targetPending = withoutCounter.groupCommitLimits()
+	if withoutCounter.shouldYieldForBatch(targetPending) {
+		t.Fatal("writer without an active-stream counter yielded")
+	}
+}
+
+func TestServerCoalescingWriterRampsGroupCommit(t *testing.T) {
+	writer := newBlockingProfileWriter()
+	activeStreams := int32(0)
+	coalescer := newServerCoalescingWriter(
+		writer,
+		func() int32 {
+			return atomic.LoadInt32(&activeStreams)
+		},
+	)
+	testCases := []struct {
+		activeStreams int32
+		maxYields     int
+		targetPending int
+	}{
+		{activeStreams: defaultMinGroupCommitStreams - 1},
+		{
+			activeStreams: defaultMinGroupCommitStreams,
+			maxYields:     defaultGroupCommitYields,
+			targetPending: defaultGroupCommitPending,
+		},
+		{
+			activeStreams: serverMidGroupCommitStreams,
+			maxYields:     serverMidGroupCommitYields,
+			targetPending: serverMidGroupCommitPending,
+		},
+		{
+			activeStreams: serverHighGroupCommitStreams,
+			maxYields:     serverHighGroupCommitYields,
+			targetPending: serverHighGroupCommitPending,
+		},
+		{
+			activeStreams: serverHighGroupCommitStreams + 3,
+			maxYields:     serverHighGroupCommitYields,
+			targetPending: serverHighGroupCommitPending,
+		},
+	}
+	for _, testCase := range testCases {
+		atomic.StoreInt32(&activeStreams, testCase.activeStreams)
+		maxYields, targetPending := coalescer.groupCommitLimits()
+		if maxYields != testCase.maxYields ||
+			targetPending != testCase.targetPending {
+			t.Fatalf(
+				"active streams=%d limits=(%d,%d), want (%d,%d)",
+				testCase.activeStreams,
+				maxYields,
+				targetPending,
+				testCase.maxYields,
+				testCase.targetPending,
+			)
+		}
+	}
+}
+
+func TestCoalescingWriterBoundsGroupCommitYields(t *testing.T) {
+	writer := newBlockingProfileWriter()
+	close(writer.release)
+	activeStreams := int32(defaultMinGroupCommitStreams)
+	coalescer := newCoalescingWriter(
+		writer,
+		func() int32 {
+			return atomic.LoadInt32(&activeStreams)
+		},
+	)
+	yieldCount := 0
+	coalescer.groupCommitYield = func() {
+		yieldCount++
+	}
+	frame := newFrame(
+		streamFrame{sid: 1, method: "Test"},
+		dataFrameType,
+		make([]byte, 1024),
+	)
+	err, closeOwner := coalescer.WriteFrame(frame)
+	if err != nil || closeOwner {
+		t.Fatalf("write result err=%v closeOwner=%t", err, closeOwner)
+	}
+	if yieldCount != defaultGroupCommitYields {
+		t.Fatalf(
+			"yield count=%d, want %d",
+			yieldCount,
+			defaultGroupCommitYields,
+		)
+	}
+
+	serverCoalescer := newServerCoalescingWriter(
+		writer,
+		func() int32 {
+			return atomic.LoadInt32(&activeStreams)
+		},
+	)
+	atomic.StoreInt32(&activeStreams, defaultMinGroupCommitStreams)
+	yieldCount = 0
+	serverCoalescer.groupCommitYield = func() {
+		yieldCount++
+	}
+	frame = newFrame(
+		streamFrame{sid: 4, method: "Test"},
+		dataFrameType,
+		make([]byte, 1024),
+	)
+	err, closeOwner = serverCoalescer.WriteFrame(frame)
+	if err != nil || closeOwner {
+		t.Fatalf("server write result err=%v closeOwner=%t", err, closeOwner)
+	}
+	if yieldCount != defaultGroupCommitYields {
+		t.Fatalf(
+			"server yield count=%d, want %d",
+			yieldCount,
+			defaultGroupCommitYields,
+		)
+	}
+
+	yieldCount = 0
+	var pending *pendingFrameWrite
+	serverCoalescer.groupCommitYield = func() {
+		yieldCount++
+		if yieldCount != 1 {
+			return
+		}
+		pending = acquirePendingFrameWrite(newFrame(
+			streamFrame{sid: 2, method: "Test"},
+			dataFrameType,
+			make([]byte, 1024),
+		))
+		serverCoalescer.mu.Lock()
+		serverCoalescer.pending = append(serverCoalescer.pending, pending)
+		serverCoalescer.pendingBytes += len(pending.frame.payload)
+		serverCoalescer.mu.Unlock()
+	}
+	frame = newFrame(
+		streamFrame{sid: 3, method: "Test"},
+		dataFrameType,
+		make([]byte, 1024),
+	)
+	err, closeOwner = serverCoalescer.WriteFrame(frame)
+	if err != nil || closeOwner {
+		t.Fatalf("batched write result err=%v closeOwner=%t", err, closeOwner)
+	}
+	if yieldCount != 1 {
+		t.Fatalf("yield count with pending frame=%d, want 1", yieldCount)
+	}
+	result := <-pending.done
+	if result.err != nil || result.leader {
+		t.Fatalf("pending write result=%+v", result)
+	}
+	releasePendingFrameWrite(pending)
+
+	serverWriter := newBlockingProfileWriter()
+	close(serverWriter.release)
+	atomic.StoreInt32(&activeStreams, serverHighGroupCommitStreams)
+	serverCoalescer = newServerCoalescingWriter(
+		serverWriter,
+		func() int32 {
+			return atomic.LoadInt32(&activeStreams)
+		},
+	)
+	yieldCount = 0
+	pendingWrites := make(
+		[]*pendingFrameWrite,
+		0,
+		serverHighGroupCommitPending,
+	)
+	serverCoalescer.groupCommitYield = func() {
+		yieldCount++
+		request := acquirePendingFrameWrite(newFrame(
+			streamFrame{
+				sid:    int32(10 + yieldCount),
+				method: "Test",
+			},
+			dataFrameType,
+			make([]byte, 1024),
+		))
+		pendingWrites = append(pendingWrites, request)
+		serverCoalescer.mu.Lock()
+		serverCoalescer.pending = append(serverCoalescer.pending, request)
+		serverCoalescer.pendingBytes += len(request.frame.payload)
+		serverCoalescer.mu.Unlock()
+	}
+	frame = newFrame(
+		streamFrame{sid: 20, method: "Test"},
+		dataFrameType,
+		make([]byte, 1024),
+	)
+	err, closeOwner = serverCoalescer.WriteFrame(frame)
+	if err != nil || closeOwner {
+		t.Fatalf(
+			"server pending-target write err=%v closeOwner=%t",
+			err,
+			closeOwner,
+		)
+	}
+	if yieldCount != serverHighGroupCommitPending {
+		t.Fatalf(
+			"server pending-target yields=%d, want %d",
+			yieldCount,
+			serverHighGroupCommitPending,
+		)
+	}
+	if serverWriter.flushes != 1 {
+		t.Fatalf("server pending-target flushes=%d, want 1", serverWriter.flushes)
+	}
+	for index, request := range pendingWrites {
+		result := <-request.done
+		if result.err != nil || result.leader {
+			t.Fatalf("pending write %d result=%+v", index, result)
+		}
+		releasePendingFrameWrite(request)
+	}
+}
+
 func TestCoalescingWriterBoundsPendingFrames(t *testing.T) {
 	const writers = 64
 	writer := newBlockingProfileWriter()
