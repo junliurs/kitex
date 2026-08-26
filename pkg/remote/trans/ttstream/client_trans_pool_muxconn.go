@@ -113,6 +113,7 @@ func (tl *muxConnTransList) Get(network, addr string) (*transport, error) {
 func newMuxConnTransPool(config MuxConnConfig) transPool {
 	t := new(muxConnTransPool)
 	t.config = config
+	t.closeCh = make(chan struct{})
 	return t
 }
 
@@ -122,6 +123,7 @@ type muxConnTransPool struct {
 	activity    sync.Map // addr:lastActive
 	cleanerOnce int32
 	closed      int32
+	closeCh     chan struct{}
 }
 
 func (p *muxConnTransPool) Get(network, addr string) (trans *transport, err error) {
@@ -145,7 +147,17 @@ func (p *muxConnTransPool) Put(trans *transport) {
 	}
 	// start cleaning background goroutine
 	gofunc.RecoverGoFuncWithInfo(context.Background(), func() {
-		for atomic.LoadInt32(&p.closed) == 0 {
+		timer := time.NewTimer(idleTimeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-p.closeCh:
+				return
+			case <-timer.C:
+			}
+			if atomic.LoadInt32(&p.closed) == 1 {
+				return
+			}
 			now := time.Now()
 			count := 0
 			p.activity.Range(func(key, value interface{}) bool {
@@ -165,7 +177,7 @@ func (p *muxConnTransPool) Put(trans *transport) {
 				p.activity.Delete(addr)
 				return true
 			})
-			time.Sleep(idleTimeout)
+			timer.Reset(idleTimeout)
 		}
 	}, gofunc.NewBasicInfo("", trans.Addr().String()))
 }
@@ -174,6 +186,7 @@ func (p *muxConnTransPool) Close() {
 	if !atomic.CompareAndSwapInt32(&p.closed, 0, 1) {
 		return
 	}
+	close(p.closeCh)
 	p.pool.Range(func(_, value any) bool {
 		value.(*muxConnTransList).Close()
 		return true

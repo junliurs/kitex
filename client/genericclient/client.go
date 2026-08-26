@@ -159,7 +159,11 @@ func (gc *genericServiceClient) Close() error {
 		}
 	}
 
-	return errs
+	if errs.HasError() {
+		return errs
+	}
+
+	return nil
 }
 
 func (gc *genericServiceClient) ClientStreaming(ctx context.Context, method string, callOptions ...streamcall.Option) (ClientStreamingClient, error) {
