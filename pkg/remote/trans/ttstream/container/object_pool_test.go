@@ -108,3 +108,34 @@ func cleaningGoroutineExist() bool {
 	}
 	return false
 }
+
+func TestObjectPool_CloseStopsCleaningGoroutine(t *testing.T) {
+	for cleaningGoroutineExist() {
+		time.Sleep(10 * time.Microsecond)
+	}
+
+	op := NewObjectPool(10 * time.Millisecond)
+	op.Push("test", new(testObject))
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cleaningGoroutineExist() {
+			break
+		}
+		time.Sleep(10 * time.Microsecond)
+	}
+	if !cleaningGoroutineExist() {
+		t.Fatal("cleaning goroutine should have started after Push")
+	}
+
+	op.Close()
+
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !cleaningGoroutineExist() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("ObjectPool.cleaning goroutine still running after Close")
+}

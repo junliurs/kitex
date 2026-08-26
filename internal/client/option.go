@@ -290,7 +290,11 @@ func (o *Options) initRemoteOpt() {
 			// configure short conn pool
 			o.TTHeaderStreamingOptions.TransportOptions = append(o.TTHeaderStreamingOptions.TransportOptions, ttstream.WithClientShortConnPool())
 		}
-		o.RemoteOpt.TTHeaderStreamingProvider = ttstream.NewClientProvider(o.TTHeaderStreamingOptions.TransportOptions...)
+		provider := ttstream.NewClientProvider(o.TTHeaderStreamingOptions.TransportOptions...)
+		o.RemoteOpt.TTHeaderStreamingProvider = provider
+		if c, ok := provider.(interface{ Close() error } /*clientProvider.Close*/); ok {
+			o.CloseCallbacks = append(o.CloseCallbacks, c.Close)
+		}
 	}
 	if o.RemoteOpt.ConnPool == nil {
 		if o.PoolCfg != nil {

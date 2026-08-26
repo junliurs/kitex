@@ -25,4 +25,5 @@ var dialer = netpoll.NewDialer()
 type transPool interface {
 	Get(network, addr string) (trans *transport, err error)
 	Put(trans *transport)
+	Close()
 }

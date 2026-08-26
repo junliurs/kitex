@@ -28,6 +28,7 @@ import (
 	"github.com/cloudwego/kitex/pkg/generic"
 	"github.com/cloudwego/kitex/pkg/serviceinfo"
 	"github.com/cloudwego/kitex/pkg/streaming"
+	"github.com/cloudwego/kitex/pkg/utils"
 	"github.com/cloudwego/kitex/transport"
 )
 
@@ -148,8 +149,17 @@ func (gc *genericServiceClient) Close() error {
 	// no need a finalizer anymore
 	runtime.SetFinalizer(gc, nil)
 
-	// Notice: don't need to close kClient because finalizer will close it.
-	return gc.g.Close()
+	var errs utils.ErrChain
+	if err := gc.g.Close(); err != nil {
+		errs.Append(err)
+	}
+	if c, ok := gc.kClient.(interface{ Close() error }); /*kClient.Close*/ ok {
+		if err := c.Close(); err != nil {
+			errs.Append(err)
+		}
+	}
+
+	return errs
 }
 
 func (gc *genericServiceClient) ClientStreaming(ctx context.Context, method string, callOptions ...streamcall.Option) (ClientStreamingClient, error) {
