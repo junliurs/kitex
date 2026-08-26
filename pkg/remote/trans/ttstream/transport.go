@@ -53,6 +53,7 @@ type transport struct {
 	pool transPool
 	// transport should operate directly on stream
 	streams       sync.Map                 // key=streamID val=stream
+	activeStreams int32                    // number of in-flight streams, used by mux pool idle cleanup
 	scache        []*stream                // size is streamCacheSize
 	spipe         *container.Pipe[*stream] // in-coming stream pipe
 	fpipe         *container.Pipe[*Frame]  // out-coming frame pipe
@@ -153,6 +154,7 @@ func (t *transport) IsActive() bool {
 func (t *transport) storeStream(s *stream) {
 	klog.Debugf("transport[%d-%s] store stream: sid=%d", t.kind, t.Addr(), s.sid)
 	t.streams.Store(s.sid, s)
+	atomic.AddInt32(&t.activeStreams, 1)
 }
 
 func (t *transport) loadStream(sid int32) (s *stream, ok bool) {
@@ -166,8 +168,9 @@ func (t *transport) loadStream(sid int32) (s *stream, ok bool) {
 
 func (t *transport) deleteStream(sid int32) {
 	klog.Debugf("transport[%d-%s] delete stream: sid=%d", t.kind, t.Addr(), sid)
-	// remove stream from transport
-	t.streams.Delete(sid)
+	if _, ok := t.streams.LoadAndDelete(sid); ok {
+		atomic.AddInt32(&t.activeStreams, -1)
+	}
 }
 
 func (t *transport) readFrame(reader bufiox.Reader) error {
