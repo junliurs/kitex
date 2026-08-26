@@ -53,7 +53,9 @@ type ObjectPool struct {
 
 func (s *ObjectPool) Push(key string, o Object) {
 	if atomic.LoadInt32(&s.closed) == 1 {
-		_ = o.Close(nil)
+		if o != nil {
+			_ = o.Close(nil)
+		}
 		return
 	}
 	s.once.Do(func() {
@@ -62,7 +64,9 @@ func (s *ObjectPool) Push(key string, o Object) {
 	s.L.Lock()
 	if atomic.LoadInt32(&s.closed) == 1 {
 		s.L.Unlock()
-		_ = o.Close(nil)
+		if o != nil {
+			_ = o.Close(nil)
+		}
 		return
 	}
 	stk := s.objects[key]
@@ -93,6 +97,7 @@ func (s *ObjectPool) Close() {
 		return
 	}
 	close(s.closeCh)
+	var objects []Object
 	s.L.Lock()
 	for key, stk := range s.objects {
 		for {
@@ -100,11 +105,16 @@ func (s *ObjectPool) Close() {
 			if !ok {
 				break
 			}
-			_ = o.object.Close(nil)
+			if o.object != nil {
+				objects = append(objects, o.object)
+			}
 		}
 		delete(s.objects, key)
 	}
 	s.L.Unlock()
+	for _, o := range objects {
+		_ = o.Close(nil)
+	}
 }
 
 func (s *ObjectPool) cleaning() {

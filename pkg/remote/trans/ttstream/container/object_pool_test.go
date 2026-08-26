@@ -159,6 +159,12 @@ func TestObjectPool_CloseDrainsPooledObjects(t *testing.T) {
 	}
 }
 
+func TestObjectPool_CloseHandlesNilObject(t *testing.T) {
+	op := NewObjectPool(time.Hour)
+	op.Push("test", nil)
+	op.Close()
+}
+
 func TestObjectPool_PushAfterCloseClosesObject(t *testing.T) {
 	op := NewObjectPool(time.Hour)
 	op.Close()
@@ -173,4 +179,10 @@ func TestObjectPool_PushAfterCloseClosesObject(t *testing.T) {
 	if atomic.LoadInt32(&closed) != 1 {
 		t.Fatal("object pushed after Close should be closed immediately")
 	}
+}
+
+func TestObjectPool_PushNilAfterClose(t *testing.T) {
+	op := NewObjectPool(time.Hour)
+	op.Close()
+	op.Push("test", nil)
 }

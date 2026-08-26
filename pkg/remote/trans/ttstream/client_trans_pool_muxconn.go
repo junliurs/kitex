@@ -175,6 +175,7 @@ func (p *muxConnTransPool) Put(trans *transport) {
 				}
 				p.pool.Delete(addr)
 				p.activity.Delete(addr)
+				v.(*muxConnTransList).Close()
 				return true
 			})
 			timer.Reset(idleTimeout)
