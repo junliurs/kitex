@@ -38,6 +38,7 @@ func NewObjectPool(idleTimeout time.Duration) *ObjectPool {
 	s := new(ObjectPool)
 	s.idleTimeout = idleTimeout
 	s.objects = make(map[string]*Stack[objectItem])
+	s.closeCh = make(chan struct{})
 	return s
 }
 
@@ -46,21 +47,35 @@ type ObjectPool struct {
 	objects     map[string]*Stack[objectItem]
 	idleTimeout time.Duration
 	closed      int32
+	closeCh     chan struct{}
 	once        sync.Once // control the background cleaning goroutine, lazy init until ObjectPool.Push is invoked
 }
 
 func (s *ObjectPool) Push(key string, o Object) {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		if o != nil {
+			_ = o.Close(nil)
+		}
+		return
+	}
 	s.once.Do(func() {
 		gofunc.RecoverGoFuncWithInfo(context.Background(), s.cleaning, gofunc.NewBasicInfo("", ""))
 	})
 	s.L.Lock()
+	if atomic.LoadInt32(&s.closed) == 1 {
+		s.L.Unlock()
+		if o != nil {
+			_ = o.Close(nil)
+		}
+		return
+	}
 	stk := s.objects[key]
 	if stk == nil {
 		stk = NewStack[objectItem]()
 		s.objects[key] = stk
 	}
-	s.L.Unlock()
 	stk.Push(objectItem{object: o, lastActive: time.Now()})
+	s.L.Unlock()
 }
 
 func (s *ObjectPool) Pop(key string) Object {
@@ -78,14 +93,43 @@ func (s *ObjectPool) Pop(key string) Object {
 }
 
 func (s *ObjectPool) Close() {
-	atomic.CompareAndSwapInt32(&s.closed, 0, 1)
+	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
+		return
+	}
+	close(s.closeCh)
+	var objects []Object
+	s.L.Lock()
+	for key, stk := range s.objects {
+		for {
+			o, ok := stk.Pop()
+			if !ok {
+				break
+			}
+			if o.object != nil {
+				objects = append(objects, o.object)
+			}
+		}
+		delete(s.objects, key)
+	}
+	s.L.Unlock()
+	for _, o := range objects {
+		_ = o.Close(nil)
+	}
 }
 
 func (s *ObjectPool) cleaning() {
 	cleanInternal := s.idleTimeout
-	for atomic.LoadInt32(&s.closed) == 0 {
-		time.Sleep(cleanInternal)
-
+	timer := time.NewTimer(cleanInternal)
+	defer timer.Stop()
+	for {
+		select {
+		case <-s.closeCh:
+			return
+		case <-timer.C:
+		}
+		if atomic.LoadInt32(&s.closed) == 1 {
+			return
+		}
 		now := time.Now()
 		s.L.Lock()
 		// clean objects
@@ -108,5 +152,6 @@ func (s *ObjectPool) cleaning() {
 			})
 		}
 		s.L.Unlock()
+		timer.Reset(cleanInternal)
 	}
 }

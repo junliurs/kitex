@@ -217,6 +217,7 @@ func (s *stream) cancel() error {
 	default:
 	}
 	s.reader.cancel()
+	s.tryRunCloseCallback(nil)
 	return nil
 }
 

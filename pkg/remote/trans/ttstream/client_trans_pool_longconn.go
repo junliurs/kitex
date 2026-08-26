@@ -71,3 +71,7 @@ func (c *longConnTransPool) Put(trans *transport) {
 	addr := trans.conn.RemoteAddr().String()
 	c.transPool.Push(addr, trans)
 }
+
+func (c *longConnTransPool) Close() {
+	c.transPool.Close()
+}

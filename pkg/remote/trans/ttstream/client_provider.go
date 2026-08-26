@@ -97,6 +97,11 @@ func (c clientProvider) NewStream(ctx context.Context, ri rpcinfo.RPCInfo) (stre
 	return cs, err
 }
 
+func (c clientProvider) Close() error {
+	c.transPool.Close()
+	return nil
+}
+
 func registerStreamCancelCallback(ctx context.Context, s *stream) {
 	ktx.RegisterCancelCallback(ctx, func() {
 		_ = s.cancel()

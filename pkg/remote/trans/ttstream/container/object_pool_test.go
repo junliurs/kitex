@@ -108,3 +108,81 @@ func cleaningGoroutineExist() bool {
 	}
 	return false
 }
+
+func TestObjectPool_CloseStopsCleaningGoroutine(t *testing.T) {
+	for cleaningGoroutineExist() {
+		time.Sleep(10 * time.Microsecond)
+	}
+
+	op := NewObjectPool(time.Hour)
+	op.Push("test", new(testObject))
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cleaningGoroutineExist() {
+			break
+		}
+		time.Sleep(10 * time.Microsecond)
+	}
+	if !cleaningGoroutineExist() {
+		t.Fatal("cleaning goroutine should have started after Push")
+	}
+
+	op.Close()
+
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !cleaningGoroutineExist() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("ObjectPool.cleaning goroutine still running after Close")
+}
+
+func TestObjectPool_CloseDrainsPooledObjects(t *testing.T) {
+	op := NewObjectPool(time.Hour)
+	var closed int32
+	count := 5
+	for i := 0; i < count; i++ {
+		o := new(testObject)
+		o.closeCallback = func() {
+			atomic.AddInt32(&closed, 1)
+		}
+		op.Push("test", o)
+	}
+
+	op.Close()
+
+	if atomic.LoadInt32(&closed) != int32(count) {
+		t.Fatalf("expected %d objects closed, got %d", count, atomic.LoadInt32(&closed))
+	}
+}
+
+func TestObjectPool_CloseHandlesNilObject(t *testing.T) {
+	op := NewObjectPool(time.Hour)
+	op.Push("test", nil)
+	op.Close()
+}
+
+func TestObjectPool_PushAfterCloseClosesObject(t *testing.T) {
+	op := NewObjectPool(time.Hour)
+	op.Close()
+
+	var closed int32
+	o := new(testObject)
+	o.closeCallback = func() {
+		atomic.AddInt32(&closed, 1)
+	}
+	op.Push("test", o)
+
+	if atomic.LoadInt32(&closed) != 1 {
+		t.Fatal("object pushed after Close should be closed immediately")
+	}
+}
+
+func TestObjectPool_PushNilAfterClose(t *testing.T) {
+	op := NewObjectPool(time.Hour)
+	op.Close()
+	op.Push("test", nil)
+}

@@ -25,10 +25,37 @@ import (
 	"github.com/cloudwego/kitex/pkg/remote/trans/ttstream/ktx"
 )
 
+type cancelTestWriter struct {
+	closed int32
+}
+
+func (w *cancelTestWriter) WriteFrame(*Frame) error {
+	return nil
+}
+
+func (w *cancelTestWriter) CloseStream(int32) error {
+	atomic.AddInt32(&w.closed, 1)
+	return nil
+}
+
 func Test_registerStreamCancelCallback(t *testing.T) {
 	ctx, cancel := ktx.WithCancel(context.Background())
 	s := &stream{peerEOF: 1}
 	registerStreamCancelCallback(ctx, s)
 	cancel()
 	test.Assert(t, atomic.LoadInt32(&s.selfEOF) == 1)
+}
+
+func Test_registerStreamCancelCallbackClosesStream(t *testing.T) {
+	ctx, cancel := ktx.WithCancel(context.Background())
+	w := new(cancelTestWriter)
+	s := newStream(ctx, w, streamFrame{sid: 1})
+	registerStreamCancelCallback(ctx, s)
+
+	cancel()
+
+	test.Assert(t, atomic.LoadInt32(&s.peerEOF) == 1)
+	test.Assert(t, atomic.LoadInt32(&s.selfEOF) == 1)
+	test.Assert(t, atomic.LoadInt32(&s.eofFlag) == 2)
+	test.Assert(t, atomic.LoadInt32(&w.closed) == 1)
 }
