@@ -84,7 +84,8 @@ func (tl *muxConnTransList) Close() {
 	tl.L.Unlock()
 }
 
-// closeIfIdle removes and closes the list only when it has no in-flight streams.
+// closeIfIdle removes and closes the list only when it has no in-flight streams
+// and no transport has been checked out for creating a stream.
 func (tl *muxConnTransList) closeIfIdle(now time.Time, idleTimeout time.Duration, removeFromPool func()) bool {
 	tl.L.Lock()
 	if atomic.LoadInt32(&tl.closed) == 1 {
@@ -99,7 +100,9 @@ func (tl *muxConnTransList) closeIfIdle(now time.Time, idleTimeout time.Duration
 		if t == nil {
 			continue
 		}
-		if atomic.LoadInt32(&t.activeStreams) > 0 {
+		// Check the lease first. NewStream converts pending -> active in that
+		// order, so the cleaner must observe at least one side of the handoff.
+		if atomic.LoadInt32(&t.pendingStreams) > 0 || atomic.LoadInt32(&t.activeStreams) > 0 {
 			tl.L.Unlock()
 			return false
 		}
@@ -126,7 +129,9 @@ func (tl *muxConnTransList) Get(network, addr string) (*transport, error) {
 	tl.L.RLock()
 	trans := tl.transports[idx]
 	if trans != nil && trans.IsActive() {
-		// refresh under RLock so closeIfIdle, which holds L.Lock, observes it
+		// Acquire a lease under RLock so closeIfIdle cannot close the transport
+		// between Get returning and WriteStream registering the new stream.
+		atomic.AddInt32(&trans.pendingStreams, 1)
 		atomic.StoreInt64(&tl.lastUsed, time.Now().UnixNano())
 		tl.L.RUnlock()
 		return trans, nil
@@ -145,6 +150,7 @@ func (tl *muxConnTransList) Get(network, addr string) (*transport, error) {
 	trans = tl.transports[idx]
 	if trans != nil && trans.IsActive() {
 		// another goroutine already create the new transport
+		atomic.AddInt32(&trans.pendingStreams, 1)
 		atomic.StoreInt64(&tl.lastUsed, time.Now().UnixNano())
 		tl.L.Unlock()
 		return trans, nil
@@ -167,6 +173,7 @@ func (tl *muxConnTransList) Get(network, addr string) (*transport, error) {
 		return nil
 	})
 	tl.transports[idx] = trans
+	atomic.AddInt32(&trans.pendingStreams, 1)
 	atomic.StoreInt64(&tl.lastUsed, time.Now().UnixNano())
 	tl.L.Unlock()
 
@@ -259,6 +266,10 @@ func (p *muxConnTransPool) Put(trans *transport) {
 			timer.Reset(idleTimeout)
 		}
 	}, gofunc.NewBasicInfo("", trans.Addr().String()))
+}
+
+func (p *muxConnTransPool) Release(trans *transport) {
+	atomic.AddInt32(&trans.pendingStreams, -1)
 }
 
 func (p *muxConnTransPool) Close() {

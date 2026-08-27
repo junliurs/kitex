@@ -19,6 +19,7 @@
 package ttstream
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	mocknetpoll "github.com/cloudwego/kitex/internal/mocks/netpoll"
 	"github.com/cloudwego/kitex/internal/test"
 	"github.com/cloudwego/kitex/pkg/remote/trans/ttstream/container"
+	"github.com/cloudwego/kitex/pkg/streaming"
 )
 
 func newTestMuxTransport(t *testing.T, p transPool, addr net.Addr) *transport {
@@ -38,6 +40,7 @@ func newTestMuxTransport(t *testing.T, p transPool, addr net.Addr) *transport {
 	conn := mocknetpoll.NewMockConnection(ctrl)
 	conn.EXPECT().LocalAddr().Return(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9999}).AnyTimes()
 	conn.EXPECT().RemoteAddr().Return(addr).AnyTimes()
+	conn.EXPECT().IsActive().Return(true).AnyTimes()
 	return &transport{
 		kind:          clientTransport,
 		conn:          conn,
@@ -91,7 +94,7 @@ func TestMuxConnTransPool_ActiveStreamPreventsIdleClose(t *testing.T) {
 
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8889}
 	trans := newTestMuxTransport(t, p, addr)
-	trans.storeStream(&stream{streamFrame: streamFrame{sid: genStreamID()}})
+	test.Assert(t, trans.storeStream(&stream{streamFrame: streamFrame{sid: genStreamID()}}) == nil)
 	tl := newMuxConnTransList(1, p)
 	tl.transports[0] = trans
 	atomic.StoreInt64(&tl.lastUsed, time.Now().Add(-time.Hour).UnixNano())
@@ -116,6 +119,69 @@ func TestMuxConnTransPool_ActiveStreamPreventsIdleClose(t *testing.T) {
 		return true
 	})
 	waitForTransportClosed(t, trans, time.Second)
+}
+
+func TestMuxConnTransPool_CheckedOutTransportPreventsIdleClose(t *testing.T) {
+	p := newMuxConnTransPool(MuxConnConfig{
+		PoolSize:       1,
+		MaxIdleTimeout: time.Millisecond,
+	}).(*muxConnTransPool)
+	defer p.Close()
+
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8890}
+	trans := newTestMuxTransport(t, p, addr)
+	tl := newMuxConnTransList(1, p)
+	tl.transports[0] = trans
+	p.pool.Store(addr.String(), tl)
+
+	got, err := p.Get(addr.Network(), addr.String())
+	test.Assert(t, err == nil, err)
+	test.Assert(t, got == trans)
+	test.Assert(t, atomic.LoadInt32(&trans.pendingStreams) == 1)
+
+	// Start the real cleaner and make the list old enough to be collected.
+	// The lease acquired by Get must keep it alive until NewStream finishes.
+	p.Put(trans)
+	atomic.StoreInt64(&tl.lastUsed, time.Now().Add(-time.Hour).UnixNano())
+	time.Sleep(50 * time.Millisecond)
+	if atomic.LoadInt32(&trans.closedFlag) == 1 {
+		t.Fatal("idle cleanup must not close a checked-out transport")
+	}
+
+	s := newStream(context.Background(), trans, streamFrame{sid: genStreamID(), method: "Bidi"})
+	test.Assert(t, trans.WriteStream(context.Background(), s, make(IntHeader), make(streaming.Header)) == nil)
+	p.Release(trans)
+	test.Assert(t, atomic.LoadInt32(&trans.pendingStreams) == 0)
+	test.Assert(t, atomic.LoadInt32(&trans.activeStreams) == 1)
+
+	// Once the lease becomes an active stream, that stream continues to keep
+	// the transport alive. Only closing it makes the list collectible.
+	atomic.StoreInt64(&tl.lastUsed, time.Now().Add(-time.Hour).UnixNano())
+	time.Sleep(50 * time.Millisecond)
+	if atomic.LoadInt32(&trans.closedFlag) == 1 {
+		t.Fatal("idle cleanup must not close a transport with an active stream")
+	}
+	test.Assert(t, trans.CloseStream(s.sid) == nil)
+	waitForTransportClosed(t, trans, time.Second)
+}
+
+func TestTransport_WriteStreamAfterCloseReturnsError(t *testing.T) {
+	p := newMuxConnTransPool(MuxConnConfig{PoolSize: 1}).(*muxConnTransPool)
+	defer p.Close()
+
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8891}
+	trans := newTestMuxTransport(t, p, addr)
+	test.Assert(t, trans.Close(nil) == nil)
+
+	s := newStream(context.Background(), trans, streamFrame{sid: genStreamID(), method: "Bidi"})
+	err := trans.WriteStream(context.Background(), s, make(IntHeader), make(streaming.Header))
+	if !errors.Is(err, errTransport) {
+		t.Fatalf("expected errTransport, got %v", err)
+	}
+	if _, ok := trans.loadStream(s.sid); ok {
+		t.Fatal("failed WriteStream must not register the stream")
+	}
+	test.Assert(t, atomic.LoadInt32(&trans.activeStreams) == 0)
 }
 
 func TestMuxConnTransPool_GetAfterCloseReturnsError(t *testing.T) {

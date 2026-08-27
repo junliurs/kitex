@@ -73,6 +73,9 @@ func (c *longConnTransPool) Put(trans *transport) {
 	c.transPool.Push(addr, trans)
 }
 
+func (c *longConnTransPool) Release(trans *transport) {
+}
+
 func (c *longConnTransPool) Close() {
 	c.transPool.Close()
 }

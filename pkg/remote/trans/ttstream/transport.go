@@ -62,6 +62,8 @@ type transport struct {
 	// transport should operate directly on stream
 	streams               sync.Map                 // key=streamID val=stream
 	activeStreams         int32                    // number of in-flight streams, used by mux pool idle cleanup
+	pendingStreams        int32                    // number of Get leases not yet released by clientProvider
+	streamMu              sync.Mutex               // coordinates stream registration with transport close
 	scache                []*stream                // size is streamCacheSize
 	spipe                 *container.Pipe[*stream] // in-coming stream pipe
 	fpipe                 *container.Pipe[*Frame]  // out-coming frame pipe
@@ -137,9 +139,12 @@ func (t *transport) Addr() net.Addr {
 // when an exception is encountered and the transport needs to be closed,
 // the exception is not nil and the currently surviving streams are aware of this exception.
 func (t *transport) Close(exception error) (err error) {
+	t.streamMu.Lock()
 	if !atomic.CompareAndSwapInt32(&t.closedFlag, 0, 1) {
+		t.streamMu.Unlock()
 		return nil
 	}
+	t.streamMu.Unlock()
 	klog.Debugf("transport[%d-%s] is closing", t.kind, t.Addr())
 	// send trailer first
 	t.streams.Range(func(key, value any) bool {
@@ -163,10 +168,20 @@ func (t *transport) IsActive() bool {
 	return atomic.LoadInt32(&t.closedFlag) == 0 && t.conn.IsActive()
 }
 
-func (t *transport) storeStream(s *stream) {
+func (t *transport) storeStreamLocked(s *stream) error {
+	if atomic.LoadInt32(&t.closedFlag) == 1 {
+		return errTransport.WithCause(errors.New("transport is closed"))
+	}
 	klog.Debugf("transport[%d-%s] store stream: sid=%d", t.kind, t.Addr(), s.sid)
 	t.streams.Store(s.sid, s)
 	atomic.AddInt32(&t.activeStreams, 1)
+	return nil
+}
+
+func (t *transport) storeStream(s *stream) error {
+	t.streamMu.Lock()
+	defer t.streamMu.Unlock()
+	return t.storeStreamLocked(s)
 }
 
 func (t *transport) loadStream(sid int32) (s *stream, ok bool) {
@@ -197,8 +212,13 @@ func (t *transport) readFrame(reader bufiox.Reader) error {
 	if fr.typ == headerFrameType && t.kind == serverTransport {
 		// server recv a header frame, we should create a new stream
 		s = newStream(context.Background(), t, fr.streamFrame)
-		t.storeStream(s)
-		err = t.spipe.Write(context.Background(), s)
+		t.streamMu.Lock()
+		if err = t.storeStreamLocked(s); err == nil {
+			if err = t.spipe.Write(context.Background(), s); err != nil {
+				t.deleteStream(s.sid)
+			}
+		}
+		t.streamMu.Unlock()
 	} else {
 		// load exist stream
 		var ok bool
@@ -308,10 +328,16 @@ func (t *transport) WriteStream(
 		return fmt.Errorf("transport already be used as other kind")
 	}
 
-	t.storeStream(s)
+	t.streamMu.Lock()
+	defer t.streamMu.Unlock()
+	if err := t.storeStreamLocked(s); err != nil {
+		return err
+	}
 	// send create stream request for server
 	fr := newFrame(streamFrame{sid: s.sid, method: s.method, header: strHeader, meta: intHeader}, headerFrameType, nil)
 	if err := t.WriteFrame(fr); err != nil {
+		t.deleteStream(s.sid)
+		recycleFrame(fr)
 		return err
 	}
 	return nil

@@ -24,6 +24,10 @@ var dialer = netpoll.NewDialer()
 
 type transPool interface {
 	Get(network, addr string) (trans *transport, err error)
+	// Release drops the temporary lease acquired by a successful Get and must
+	// be called exactly once. Pools that do not coordinate Get with idle
+	// cleanup may implement it as a no-op.
+	Release(trans *transport)
 	Put(trans *transport)
 	Close()
 }

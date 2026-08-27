@@ -88,6 +88,7 @@ func (c clientProvider) NewStream(ctx context.Context, ri rpcinfo.RPCInfo) (stre
 	if err != nil {
 		return nil, err
 	}
+	defer c.transPool.Release(trans)
 
 	// create new stream
 	s := newStream(ctx, trans, streamFrame{sid: genStreamID(), method: method})

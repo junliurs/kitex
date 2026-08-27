@@ -44,6 +44,9 @@ func (p *shortConnTransPool) Put(trans *transport) {
 	_ = trans.Close(errTransport.WithCause(errors.New("short connection closed")))
 }
 
+func (p *shortConnTransPool) Release(trans *transport) {
+}
+
 func (p *shortConnTransPool) Close() {
 }
 

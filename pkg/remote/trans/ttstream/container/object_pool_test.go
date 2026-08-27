@@ -57,7 +57,10 @@ func TestObjectPool(t *testing.T) {
 	test.Assert(t, op.objects[key].Size() == 0)
 	op.Close()
 
-	op = NewObjectPool(time.Second)
+	// Keep the timeout well above the time needed to push 10k objects under
+	// the race detector. This part verifies Close, not idle expiration.
+	op = NewObjectPool(time.Hour)
+	defer op.Close()
 	var deleted int32
 	for i := 0; i < count; i++ {
 		o := new(testObject)
@@ -73,9 +76,7 @@ func TestObjectPool(t *testing.T) {
 
 func TestObjectPool_cleaningLazyInit(t *testing.T) {
 	// wait for all cleaning goroutines created by other tests finished
-	for cleaningGoroutineExist() {
-		time.Sleep(10 * time.Microsecond)
-	}
+	waitForNoCleaningGoroutine(t, time.Second)
 	op := NewObjectPool(10 * time.Microsecond)
 	defer op.Close()
 	if cleaningGoroutineExist() {
@@ -109,10 +110,20 @@ func cleaningGoroutineExist() bool {
 	return false
 }
 
-func TestObjectPool_CloseStopsCleaningGoroutine(t *testing.T) {
-	for cleaningGoroutineExist() {
-		time.Sleep(10 * time.Microsecond)
+func waitForNoCleaningGoroutine(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !cleaningGoroutineExist() {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
+	t.Fatal("ObjectPool.cleaning goroutine did not stop")
+}
+
+func TestObjectPool_CloseStopsCleaningGoroutine(t *testing.T) {
+	waitForNoCleaningGoroutine(t, time.Second)
 
 	op := NewObjectPool(time.Hour)
 	op.Push("test", new(testObject))
