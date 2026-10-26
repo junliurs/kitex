@@ -296,12 +296,13 @@ func newHTTP2Client(ctx context.Context, conn net.Conn, opts ConnectOptions,
 		err := t.loopy.run(conn.RemoteAddr().String())
 		if err != nil {
 			klog.CtxErrorf(ctx, "KITEX: grpc client loopyWriter.run returning, error=%v", err)
+			err = connectionErrorf(true, err, "loopy writer exited, remoteAddress=%s, error=%v", t.conn.RemoteAddr(), err)
+		} else {
+			err = ErrConnClosing
 		}
-		// If it's a connection error, let reader goroutine handle it
-		// since there might be data in the buffers.
-		if _, ok := err.(net.Error); !ok {
-			t.conn.Close()
-		}
+		// A transport cannot serve streams after its writer exits. Close it here
+		// instead of relying on the reader, which may be blocked in throttle.
+		t.Close(err)
 		close(t.writerDone)
 	}, gofunc.NewBasicInfo(cfg.RemoteService, conn.RemoteAddr().String()))
 
