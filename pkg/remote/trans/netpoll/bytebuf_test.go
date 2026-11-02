@@ -144,7 +144,8 @@ func checkReadable(t *testing.T, buf remote.ByteBuffer) {
 	test.Assert(t, n == 3*len(msg), n)
 
 	n = buf.ReadLen()
-	test.Assert(t, n == len(msg)-1, n)
+	// The cursor consumed Skip(1+len(msg)) and Next(len(msg)-1); Peek consumes nothing.
+	test.Assert(t, n == 2*len(msg), n)
 
 	s, err = buf.ReadString(len(msg))
 	test.Assert(t, err == nil, err)
