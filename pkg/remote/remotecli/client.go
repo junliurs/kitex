@@ -60,7 +60,7 @@ type leaseCancellation struct {
 
 func watchLease(ctx context.Context, conn net.Conn) *leaseCancellation {
 	w := &leaseCancellation{done: make(chan struct{}), ctx: ctx}
-	w.stop = context.AfterFunc(ctx, func() {
+	w.stop = remote.AfterUnaryCancellation(ctx, func() {
 		defer close(w.done)
 		if interruptible, ok := conn.(interface{ InterruptReadWrite() error }); ok {
 			interruptible.InterruptReadWrite()

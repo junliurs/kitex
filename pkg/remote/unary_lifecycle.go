@@ -18,6 +18,8 @@ import (
 
 var ErrUnaryLifecycleProtocol = errors.New("unary lifecycle requires Buffered, TTHeader or Framed Thrift unary and the default codec")
 
+var ErrUnaryLifecycleGoVersion = errors.New("unary lifecycle requires Go 1.21+; legacy Kitex remains supported on Go 1.20")
+
 type UnaryLifecycle interface {
 	ClientPrepare(context.Context, *UnaryCall) error
 	ClientFinish(context.Context, *UnaryCall) error
@@ -154,7 +156,7 @@ func ContextForUnaryRequest(ctx context.Context, call *UnaryCall) context.Contex
 		return ctx
 	}
 	if state, ok := ctx.Value(unaryConnectionCancelKey{}).(unaryConnectionCancellation); ok {
-		return unaryOnewayContext{Context: context.WithoutCancel(ctx), lifetime: state.parent}
+		return unaryOnewayContext{Context: withoutUnaryCancel(ctx), lifetime: state.parent}
 	}
 	return ctx
 }

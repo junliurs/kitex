@@ -150,6 +150,9 @@ func (kc *kClient) checkOptions() (err error) {
 		return errors.New("service name is required")
 	}
 	if kc.unaryLifecycle() != nil {
+		if !remote.UnaryLifecycleSupported {
+			return remote.ErrUnaryLifecycleGoVersion
+		}
 		tp := kc.opt.Configs.TransportProtocol()
 		if kc.svcInfo.PayloadCodec != serviceinfo.Thrift || (tp != transport.PurePayload && tp != transport.TTHeader && tp != transport.TTHeaderFramed && tp != transport.Framed) {
 			return remote.ErrUnaryLifecycleProtocol

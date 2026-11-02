@@ -43,6 +43,9 @@ func NewDefaultSvrTransHandler(opt *remote.ServerOption, ext Extension) (remote.
 // NewUnarySvrTransHandler opts into governance without extending ServerOption.
 func NewUnarySvrTransHandler(opt *remote.ServerOption, ext Extension, lifecycle remote.UnaryLifecycle) (remote.ServerTransHandler, error) {
 	if lifecycle != nil {
+		if !remote.UnaryLifecycleSupported {
+			return nil, remote.ErrUnaryLifecycleGoVersion
+		}
 		if _, ok := opt.Codec.(interface {
 			PrepareUnaryWire(context.Context, remote.Message, *remote.UnaryCall) error
 		}); !ok {
