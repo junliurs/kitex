@@ -149,6 +149,15 @@ func (kc *kClient) checkOptions() (err error) {
 	if kc.opt.Svr.ServiceName == "" {
 		return errors.New("service name is required")
 	}
+	if kc.unaryLifecycle() != nil {
+		tp := kc.opt.Configs.TransportProtocol()
+		if kc.svcInfo.PayloadCodec != serviceinfo.Thrift || (tp != transport.PurePayload && tp != transport.TTHeader && tp != transport.TTHeaderFramed && tp != transport.Framed) {
+			return remote.ErrUnaryLifecycleProtocol
+		}
+		if kc.opt.Proxy != nil || kc.opt.WarmUpOption != nil {
+			return errors.New("unary lifecycle cannot be combined with a proxy or connection warmup")
+		}
+	}
 	return nil
 }
 
@@ -208,6 +217,19 @@ func (kc *kClient) initProxy() error {
 
 func (kc *kClient) initConnPool() error {
 	pool := kc.opt.RemoteOpt.ConnPool
+	if lifecycle, ok := kc.unaryLifecycle().(remote.UnaryClientPoolLifecycle); ok {
+		unbind, err := lifecycle.ClientPool(pool)
+		if err != nil {
+			if unbind != nil {
+				unbind()
+			}
+			_ = pool.Close()
+			return err
+		}
+		if unbind != nil {
+			kc.opt.CloseCallbacks = append(kc.opt.CloseCallbacks, func() error { unbind(); return nil })
+		}
+	}
 	kc.opt.CloseCallbacks = append(kc.opt.CloseCallbacks, pool.Close)
 
 	if df, ok := pool.(interface{ Dump() interface{} }); ok {
@@ -300,11 +322,11 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 	mw.mws = append(mw.mws, contextMW)
 	mw.mws = append(mw.mws, builderMWs...)
 	mw.mws = append(mw.mws, acl.NewACLMiddleware(kc.opt.ACLRules))
-	if kc.opt.Proxy == nil {
+	if kc.unaryLifecycle() == nil && kc.opt.Proxy == nil {
 		mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
 		mw.mws = append(mw.mws, kc.opt.CBSuite.InstanceCBMW())
 		mw.mws = append(mw.mws, richMWsWithBuilder(ctx, kc.opt.IMWBs)...)
-	} else {
+	} else if kc.unaryLifecycle() == nil {
 		if kc.opt.Resolver != nil { // customized service discovery
 			mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
 		}
@@ -314,11 +336,13 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 
 	// 2. unary middlewares
 	mw.uMws = append(mw.uMws, kc.opt.CBSuite.ServiceCBMW().ToUnaryMiddleware())
-	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil {
+	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil && kc.unaryLifecycle() == nil {
 		// integrate xds if enabled
 		mw.uMws = append(mw.uMws, kc.opt.XDSRouterMiddleware.ToUnaryMiddleware())
 	}
-	mw.uMws = append(mw.uMws, rpcTimeoutMW(ctx))
+	if kc.unaryLifecycle() == nil {
+		mw.uMws = append(mw.uMws, rpcTimeoutMW(ctx))
+	}
 	kc.opt.UnaryOptions.InitMiddlewares(ctx)
 	mw.uMws = append(mw.uMws, kc.opt.UnaryOptions.UnaryMiddlewares...)
 
@@ -331,7 +355,7 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 	}
 	kc.opt.StreamOptions.InitMiddlewares(ctx)
 	mw.sMws = append([]cep.StreamMiddleware{kc.opt.CBSuite.StreamingServiceCBMW()}, kc.opt.StreamOptions.StreamMiddlewares...)
-	return
+	return mw
 }
 
 func richMWsWithBuilder(ctx context.Context, mwBs []endpoint.MiddlewareBuilder) (mws []endpoint.Middleware) {
@@ -340,7 +364,7 @@ func richMWsWithBuilder(ctx context.Context, mwBs []endpoint.MiddlewareBuilder) 
 			mws = append(mws, mw)
 		}
 	}
-	return
+	return mws
 }
 
 // initRPCInfo initializes the RPCInfo structure and attaches it to context.
@@ -508,6 +532,9 @@ func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
+	if kc.unaryLifecycle() != nil {
+		return kc.unaryLifecycleEndpoint(transPipl)
+	}
 	return func(ctx context.Context, req, resp interface{}) (err error) {
 		var sendMsg remote.Message
 		var recvMsg remote.Message
@@ -521,7 +548,7 @@ func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
 
 		cli, err := remotecli.NewClient(ctx, ri, transPipl, kc.opt.RemoteOpt)
 		if err != nil {
-			return
+			return err
 		}
 
 		defer cli.Recycle()
@@ -533,7 +560,7 @@ func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
 		}
 
 		if err = cli.Send(ctx, ri, sendMsg); err != nil {
-			return
+			return err
 		}
 		if m.OneWay() {
 			cli.Recv(ctx, ri, nil)
@@ -702,7 +729,7 @@ func getCalloptRetryPolicy(callOpts *callopt.CallOptions) (callOptRetry *retry.P
 			callOptRetry = &callOpts.RetryPolicy
 		}
 	}
-	return
+	return callOptRetry
 }
 
 func doFallbackIfNeeded(ctx context.Context, ri rpcinfo.RPCInfo, request, response interface{}, oriErr error, cliFallback *fallback.Policy, callOpts *callopt.CallOptions) (err, reportErr error) {
@@ -723,7 +750,7 @@ func doFallbackIfNeeded(ctx context.Context, ri rpcinfo.RPCInfo, request, respon
 	if err == nil && !hasFallback {
 		err = ri.Invocation().BizStatusErr()
 	}
-	return
+	return err, reportErr
 }
 
 // return fallback policy from call option and client option.

@@ -26,6 +26,15 @@ import (
 type ConnOption struct {
 	Dialer         Dialer
 	ConnectTimeout time.Duration
+	Policy         ConnectionPolicy
+}
+
+// Per-attempt constraints selected by governance. Framework idle/global limits
+// remain upper bounds; policy is copied with the borrowed connection.
+type ConnectionPolicy struct {
+	Enabled            bool
+	IdleTimeout        time.Duration
+	MaxIdleConnections uint32
 }
 
 // ConnPool is used to get connections.

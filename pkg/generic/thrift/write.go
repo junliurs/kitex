@@ -138,27 +138,27 @@ func typeJSONOf(data *gjson.Result, t *descriptor.TypeDescriptor, opt *writerOpt
 	case descriptor.BOOL:
 		v = data.Bool()
 		w = writeBool
-		return
+		return v, w, err
 	case descriptor.I08:
 		v = int8(data.Int())
 		w = writeInt8
-		return
+		return v, w, err
 	case descriptor.I16:
 		v = int16(data.Int())
 		w = writeInt16
-		return
+		return v, w, err
 	case descriptor.I32:
 		v = int32(data.Int())
 		w = writeInt32
-		return
+		return v, w, err
 	case descriptor.I64:
 		v = data.Int()
 		w = writeInt64
-		return
+		return v, w, err
 	case descriptor.DOUBLE:
 		v = data.Float()
 		w = writeJSONFloat64
-		return
+		return v, w, err
 	case descriptor.STRING:
 		v = data.String()
 		if t.Name == "binary" && opt.binaryWithBase64 {
@@ -166,25 +166,25 @@ func typeJSONOf(data *gjson.Result, t *descriptor.TypeDescriptor, opt *writerOpt
 		} else {
 			w = writeString
 		}
-		return
+		return v, w, err
 	// case descriptor.BINARY:
 	//	return writeBinary, nil
 	case descriptor.SET, descriptor.LIST:
 		v = data.Array()
 		w = writeJSONList
-		return
+		return v, w, err
 	case descriptor.MAP:
 		v = data.Map()
 		w = writeStringJSONMap
-		return
+		return v, w, err
 	case descriptor.STRUCT:
 		v = data
 		w = writeJSON
-		return
+		return v, w, err
 	case descriptor.VOID: // nil and Void
 		v = data
 		w = writeVoid
-		return
+		return v, w, err
 	}
 	return 0, nil, fmt.Errorf("data:%#v, expected type:%s, err:%#v", data, tt, err)
 }
@@ -664,6 +664,12 @@ func writeStruct(ctx context.Context, val interface{}, out *thrift.BufferWriter,
 
 	var err error
 	for name, field := range t.Struct.FieldsByName {
+		if handled, err := writePreparedPayloadMetadata(ctx, out, t, field); handled {
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		elem, ok := fg(val, field)
 		if field.Type.IsRequestBase && opt.requestBase != nil {
 			if err := writeRequestBase(ctx, elem, out, field, opt); err != nil {
@@ -760,6 +766,12 @@ func writeHTTPRequest(ctx context.Context, val interface{}, out *thrift.BufferWr
 func writeJSON(ctx context.Context, val interface{}, out *thrift.BufferWriter, t *descriptor.TypeDescriptor, opt *writerOption) error {
 	data := val.(*gjson.Result)
 	for name, field := range t.Struct.FieldsByName {
+		if handled, err := writePreparedPayloadMetadata(ctx, out, t, field); handled {
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		elem := data.Get(name)
 		if field.Type.IsRequestBase && opt.requestBase != nil {
 			elemI := elem.Value()

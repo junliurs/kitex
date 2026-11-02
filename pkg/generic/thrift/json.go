@@ -173,7 +173,7 @@ func (m *ReadJSON) SetDynamicGo(convOpts, convOptsWithException *conv.Options) {
 // Read read data from in thrift.TProtocol and convert to json string
 func (m *ReadJSON) Read(ctx context.Context, method string, isClient bool, dataLen int, in bufiox.Reader) (interface{}, error) {
 	// fallback logic
-	if !m.dynamicgoEnabled || dataLen <= 0 {
+	if !m.dynamicgoEnabled || dataLen <= 0 || payloadMetadataFromContext(ctx) != nil {
 		return m.originalRead(ctx, method, isClient, in)
 	}
 
@@ -240,10 +240,10 @@ func (m *ReadJSON) originalRead(ctx context.Context, method string, isClient boo
 	defer br.Recycle()
 
 	if fnDsc.IsWithoutWrapping {
-		return structReader(ctx, tyDsc, &readerOption{forJSON: true, binaryWithBase64: m.binaryWithBase64}, br)
+		return structReader(ctx, tyDsc, &readerOption{metadata: payloadMetadataFromContext(ctx), forJSON: true, binaryWithBase64: m.binaryWithBase64}, br)
 	}
 
-	resp, err := skipStructReader(ctx, br, tyDsc, &readerOption{forJSON: true, throwException: true, binaryWithBase64: m.binaryWithBase64})
+	resp, err := skipStructReader(ctx, br, tyDsc, &readerOption{metadata: payloadMetadataFromContext(ctx), forJSON: true, throwException: true, binaryWithBase64: m.binaryWithBase64})
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +258,10 @@ func (m *ReadJSON) originalRead(ctx context.Context, method string, isClient boo
 		return resp, nil
 	}
 
+	if metadata := payloadMetadataFromContext(ctx); metadata != nil {
+		metadata.JSON = &PayloadJSON{Value: resp}
+		return metadata.JSON, nil
+	}
 	// resp is map
 	// note: use json-iterator since sonic doesn't support map[interface{}]interface{}
 	respNode, err := jsoniter.Marshal(resp)
@@ -303,7 +307,7 @@ func structReader(ctx context.Context, typeDesc *descriptor.TypeDescriptor, opt 
 // Write write json string to out thrift.TProtocol
 func (m *WriteJSON) Write(ctx context.Context, out bufiox.Writer, msg interface{}, method string, isClient bool, requestBase *base.Base) error {
 	// fallback logic
-	if !m.dynamicgoEnabled {
+	if !m.dynamicgoEnabled || payloadMetadataFromContext(ctx) != nil {
 		return m.originalWrite(ctx, out, msg, method, isClient, requestBase)
 	}
 

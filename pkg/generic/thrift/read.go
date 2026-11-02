@@ -32,6 +32,7 @@ import (
 var emptyPbDsc = &desc.MessageDescriptor{}
 
 type readerOption struct {
+	metadata *PayloadMetadata
 	// result will be encode to json, so map[interface{}]interface{} will not be valid
 	// need use map[string]interface{} instead
 	forJSON bool
@@ -329,6 +330,15 @@ func readStruct(ctx context.Context, in *thrift.BufferReader, t *descriptor.Type
 		st = holder
 	}
 
+	metadataMembers := opt.metadata != nil && opt.metadata.Field.Type == t
+	if metadataMembers {
+		opt.metadata.beginMembers()
+		if !opt.forJSON {
+			metadataOption := *opt
+			metadataOption.forJSON = true
+			opt = &metadataOption
+		}
+	}
 	var err error
 	// set default value
 	// void is nil struct
@@ -396,13 +406,22 @@ func readStruct(ctx context.Context, in *thrift.BufferReader, t *descriptor.Type
 			if err != nil {
 				return nil, fmt.Errorf("reader of %s/%s/%d error %w", t.Name, field.Name, fieldID, err)
 			}
+			if metadataMembers {
+				if err := opt.metadata.recordMember(int32(fieldID), val); err != nil {
+					return nil, err
+				}
+			}
 			if field.ValueMapping != nil {
 				if val, err = field.ValueMapping.Response(ctx, val, field); err != nil {
 					return nil, err
 				}
 			}
 			nest()
-
+			if metadata := opt.metadata; metadata != nil && metadata.Field.Owner == t {
+				if err := metadata.Observe(t, field, val); err != nil {
+					return nil, err
+				}
+			}
 			if err := fs(field, val); err != nil {
 				return nil, err
 			}

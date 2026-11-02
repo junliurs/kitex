@@ -50,6 +50,9 @@ type Streaming interface {
 
 // Stream implements the Streaming interface
 func (kc *kClient) Stream(ctx context.Context, method string, request, response interface{}) error {
+	if kc.opt.RemoteOpt.UnaryLifecycle != nil {
+		return remote.ErrUnaryLifecycleProtocol
+	}
 	if !kc.inited {
 		panic("client not initialized")
 	}
@@ -114,6 +117,9 @@ func (kc *kClient) Stream(ctx context.Context, method string, request, response 
 
 // StreamX implements the Streaming interface
 func (kc *kClient) StreamX(ctx context.Context, method string) (streaming.ClientStream, error) {
+	if kc.opt.RemoteOpt.UnaryLifecycle != nil {
+		return nil, remote.ErrUnaryLifecycleProtocol
+	}
 	if !kc.inited {
 		panic("client not initialized")
 	}
@@ -185,7 +191,7 @@ func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, error) {
 		ri := rpcinfo.GetRPCInfo(ctx)
 		st, scm, err := remotecli.NewStream(ctx, ri, handler, kc.opt.RemoteOpt)
 		if err != nil {
-			return
+			return err
 		}
 
 		clientStream := newStream(ctx, st, scm, kc, ri, ri.Invocation().MethodInfo().StreamingMode(),
@@ -193,7 +199,7 @@ func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, error) {
 		rresp := resp.(*streaming.Result)
 		rresp.ClientStream = clientStream
 		rresp.Stream = clientStream.GetGRPCStream()
-		return
+		return err
 	}, nil
 }
 
@@ -257,7 +263,7 @@ func (s *stream) Header() (hd streaming.Header, err error) {
 	if hd, err = s.ClientStream.Header(); err != nil {
 		s.DoFinish(err)
 	}
-	return
+	return hd, err
 }
 
 // RecvMsg receives a message from the server.
@@ -283,7 +289,7 @@ func (s *stream) RecvMsg(ctx context.Context, m interface{}) (err error) {
 	if err != nil || s.streamingMode == serviceinfo.StreamingClient {
 		s.DoFinish(err)
 	}
-	return
+	return err
 }
 
 func (s *stream) handleStreamRecvEvent(err error) {
@@ -326,7 +332,7 @@ func (s *stream) SendMsg(ctx context.Context, m interface{}) (err error) {
 	if err != nil {
 		s.DoFinish(err)
 	}
-	return
+	return err
 }
 
 func (s *stream) handleStreamSendEvent(err error) {
@@ -386,7 +392,7 @@ func (s *grpcStream) Header() (md metadata.MD, err error) {
 	if md, err = s.Stream.Header(); err != nil {
 		s.st.DoFinish(err)
 	}
-	return
+	return md, err
 }
 
 func (s *grpcStream) RecvMsg(m interface{}) (err error) {
@@ -400,7 +406,7 @@ func (s *grpcStream) RecvMsg(m interface{}) (err error) {
 	if err != nil || s.st.streamingMode == serviceinfo.StreamingClient {
 		s.st.DoFinish(err)
 	}
-	return
+	return err
 }
 
 func (s *grpcStream) recvWithTimeout(m interface{}) error {
@@ -422,7 +428,7 @@ func (s *grpcStream) SendMsg(m interface{}) (err error) {
 	if err != nil {
 		s.st.DoFinish(err)
 	}
-	return
+	return err
 }
 
 func (s *grpcStream) DoFinish(err error) {

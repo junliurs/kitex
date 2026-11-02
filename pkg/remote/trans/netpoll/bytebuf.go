@@ -62,10 +62,12 @@ func newNetpollByteBuffer() interface{} {
 }
 
 type netpollByteBuffer struct {
-	writer   netpoll.Writer
-	reader   netpoll.Reader
-	status   int
-	readSize int
+	writer        netpoll.Writer
+	reader        netpoll.Reader
+	status        int
+	readSize      int
+	captureMark   netpoll.ReadMark
+	captureMarked bool
 }
 
 var _ remote.ByteBuffer = &netpollByteBuffer{}
@@ -88,7 +90,7 @@ func (b *netpollByteBuffer) Next(n int) (p []byte, err error) {
 	if p, err = b.reader.Next(n); err == nil {
 		b.readSize += n
 	}
-	return
+	return p, err
 }
 
 // Peek returns the next n bytes without advancing the reader.
@@ -105,7 +107,10 @@ func (b *netpollByteBuffer) Skip(n int) (err error) {
 	if b.status&remote.BitReadable == 0 {
 		return errors.New("unreadable buffer, cannot support Skip")
 	}
-	return b.reader.Skip(n)
+	if err = b.reader.Skip(n); err == nil {
+		b.readSize += n
+	}
+	return err
 }
 
 // ReadableLen returns the total length of readable buffer.
@@ -148,7 +153,7 @@ func (b *netpollByteBuffer) ReadString(n int) (s string, err error) {
 	if s, err = b.reader.ReadString(n); err == nil {
 		b.readSize += n
 	}
-	return
+	return s, err
 }
 
 // ReadBinary like ReadString.
@@ -164,7 +169,7 @@ func (b *netpollByteBuffer) ReadBinary(p []byte) (n int, err error) {
 	}
 	copy(p, buf)
 	b.readSize += n
-	return
+	return n, err
 }
 
 // Malloc n bytes sequentially in the writer buffer.
@@ -248,7 +253,7 @@ func (b *netpollByteBuffer) AppendBuffer(buf remote.ByteBuffer) (err error) {
 	subBuf := buf.(*netpollByteBuffer)
 	err = b.writer.Append(subBuf.writer)
 	buf.Release(nil)
-	return
+	return err
 }
 
 // Bytes are not supported in netpoll bytebuf.
@@ -268,7 +273,7 @@ func (b *netpollByteBuffer) Release(e error) (err error) {
 	}
 	b.zero()
 	bytebufPool.Put(b)
-	return
+	return err
 }
 
 func (b *netpollByteBuffer) zero() {
@@ -276,6 +281,8 @@ func (b *netpollByteBuffer) zero() {
 	b.reader = nil
 	b.status = 0
 	b.readSize = 0
+	b.captureMark = netpoll.ReadMark{}
+	b.captureMarked = false
 }
 
 // GetWrittenBytes gets all written bytes from linkbuffer.
@@ -285,3 +292,52 @@ func GetWrittenBytes(lb *netpoll.LinkBuffer) (buf []byte, err error) {
 	}
 	return lb.Bytes(), nil
 }
+
+// BeginBorrowedMessage records a cursor only; no recording data is prepared
+// until governance has selected this message for Capture.
+func (b *netpollByteBuffer) BeginBorrowedMessage() {
+	b.captureMarked = false
+	if r, ok := b.reader.(interface{ MarkRead() netpoll.ReadMark }); ok {
+		b.captureMark, b.captureMarked = r.MarkRead(), true
+	}
+}
+
+func (b *netpollByteBuffer) BorrowConsumedMessage(dst [][]byte) [][]byte {
+	if b.captureMarked {
+		if r, ok := b.reader.(interface {
+			ConsumedSlices(netpoll.ReadMark, [][]byte) [][]byte
+		}); ok {
+			return r.ConsumedSlices(b.captureMark, dst)
+		}
+	}
+	return dst
+}
+
+func (b *netpollByteBuffer) WaitReadable(n int) error {
+	if r, ok := b.reader.(interface{ WaitReadable(int) error }); ok {
+		return r.WaitReadable(n)
+	}
+	_, err := b.reader.Peek(n)
+	return err
+}
+
+func (b *netpollByteBuffer) BorrowMessage(remaining int, dst [][]byte) ([][]byte, error) {
+	if !b.captureMarked {
+		return dst, errors.New("message has no retained read cursor")
+	}
+	parts := b.BorrowConsumedMessage(dst)
+	if remaining == 0 {
+		return parts, nil
+	}
+	if r, ok := b.reader.(interface {
+		PeekSlices(int, [][]byte) ([][]byte, error)
+	}); ok {
+		return r.PeekSlices(remaining, parts)
+	}
+	if r, ok := b.reader.(interface{ PeekSlices(int, [][]byte) [][]byte }); ok {
+		return r.PeekSlices(remaining, parts), nil
+	}
+	return nil, errors.New("reader has no borrowed node view")
+}
+
+func (b *netpollByteBuffer) CanBorrowMessage() bool { return b.captureMarked }

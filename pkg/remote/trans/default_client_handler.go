@@ -18,7 +18,11 @@ package trans
 
 import (
 	"context"
+	"errors"
 	"net"
+	"time"
+
+	"github.com/cloudwego/gopkg/protocol/thrift"
 
 	"github.com/cloudwego/kitex/pkg/kerrors"
 	"github.com/cloudwego/kitex/pkg/klog"
@@ -48,30 +52,124 @@ func (t *cliTransHandler) Write(ctx context.Context, conn net.Conn, sendMsg remo
 	var bufWriter remote.ByteBuffer
 	rpcinfo.Record(ctx, sendMsg.RPCInfo(), stats.WriteStart, nil)
 	defer func() {
+		if call := remote.UnaryCallFromContext(ctx); call != nil && !call.WriteStart.IsZero() {
+			call.WriteEnd = time.Now()
+		}
 		t.ext.ReleaseBuffer(bufWriter, err)
 		rpcinfo.Record(ctx, sendMsg.RPCInfo(), stats.WriteFinish, err)
 	}()
 
 	bufWriter = t.ext.NewWriteByteBuffer(ctx, conn, sendMsg)
 	sendMsg.SetPayloadCodec(t.opt.PayloadCodec)
+	if call, h := bytesLifecycle(ctx); h != nil {
+		frame, owner, e := encodeTransportBytes(ctx, t.codec, sendMsg, bufWriter)
+		if e != nil {
+			return ctx, e
+		}
+		defer owner.Release(nil)
+		r, e := processBytes(ctx, call, h, remote.UnaryBytesEgressRequest, frame)
+		if e != nil {
+			return ctx, e
+		}
+		defer releaseBytes(r)
+		if r.Action != remote.UnaryBytesContinue {
+			call.BytesReply = copyBytesResult(r)
+			call.BytesRejected = r.Action == remote.UnaryBytesReject
+			return ctx, nil
+		}
+		call.WriteStart = time.Now()
+		if e = writeTransportBytes(bufWriter, owner, frame, r.Bytes); e != nil {
+			return ctx, e
+		}
+		return ctx, bufWriter.Flush()
+	}
+	if call, h := captureLifecycle(ctx); h != nil {
+		if handled, e := writeCapturedMessage(ctx, t.codec, sendMsg, bufWriter, call, h, remote.UnaryBytesEgressRequest); handled {
+			return ctx, e
+		}
+		frame, owner, e := encodeTransportBytes(ctx, t.codec, sendMsg, bufWriter)
+		if e != nil {
+			return ctx, e
+		}
+		defer owner.Release(nil)
+		captureWire(ctx, call, h, remote.UnaryBytesEgressRequest, frame)
+		call.WriteStart = time.Now()
+		if e = writeTransportBytes(bufWriter, owner, frame, frame); e != nil {
+			return ctx, e
+		}
+		return ctx, bufWriter.Flush()
+	}
+
 	err = t.codec.Encode(ctx, sendMsg, bufWriter)
 	if err != nil {
 		return ctx, err
+	}
+	if call := remote.UnaryCallFromContext(ctx); call != nil {
+		call.WriteStart = time.Now()
 	}
 	return ctx, bufWriter.Flush()
 }
 
 // Read implements the remote.ClientTransHandler interface.
 func (t *cliTransHandler) Read(ctx context.Context, conn net.Conn, recvMsg remote.Message) (nctx context.Context, err error) {
+	defer func() {
+		if err == nil {
+			if value, ok := recvMsg.Data().(interface{ MaterializePayload() error }); ok {
+				err = value.MaterializePayload()
+			}
+		}
+	}()
+
 	var bufReader remote.ByteBuffer
 	rpcinfo.Record(ctx, recvMsg.RPCInfo(), stats.ReadStart, nil)
 	defer func() {
+		if call := remote.UnaryCallFromContext(ctx); call != nil {
+			if p := recover(); p != nil {
+				err = rpcinfo.ClientPanicToErr(ctx, p, recvMsg.RPCInfo(), false)
+				nctx = ctx
+			}
+			if call.ReadEnd.IsZero() {
+				call.ReadEnd = time.Now()
+			}
+			if err == nil && ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			if err != nil {
+				call.FailureStage = remote.UnaryFailureReceive
+				var application *thrift.ApplicationException
+				if recvMsg.MessageType() == remote.Exception && errors.As(err, &application) {
+					call.FailureStage = remote.UnaryFailureBusiness
+				}
+
+			}
+			err = call.FinishClient(ctx, err)
+			remote.RefreshUnaryRPCInfo(recvMsg, conn)
+		}
 		t.ext.ReleaseBuffer(bufReader, err)
 		rpcinfo.Record(ctx, recvMsg.RPCInfo(), stats.ReadFinish, err)
 	}()
 
 	t.ext.SetReadTimeout(ctx, conn, recvMsg.RPCInfo().Config(), recvMsg.RPCRole())
+	if call := remote.UnaryCallFromContext(ctx); call != nil {
+		if response, ok := call.Lifecycle.(remote.UnaryClientResponseLifecycle); ok {
+			bufReader, err = t.readGovernedResponse(ctx, conn, recvMsg, call, response, &bufReader)
+			if err != nil && t.ext.IsTimeoutErr(err) {
+				err = kerrors.ErrRPCTimeout.WithCause(err)
+			}
+			return ctx, err
+		}
+	}
+
 	bufReader = t.ext.NewReadByteBuffer(ctx, conn, recvMsg)
+	if call := remote.UnaryCallFromContext(ctx); call != nil && call.ResponseDelay > 0 {
+		if _, err = bufReader.Peek(1); err != nil {
+			return ctx, err
+		}
+		if err = call.WaitResponseDelay(ctx, time.Now()); err != nil {
+			return ctx, err
+		}
+	}
+
 	recvMsg.SetPayloadCodec(t.opt.PayloadCodec)
 	err = t.codec.Decode(ctx, recvMsg, bufReader)
 	if err != nil {

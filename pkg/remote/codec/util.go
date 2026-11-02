@@ -60,6 +60,9 @@ func SetOrCheckMethodName(ctx context.Context, methodName string, message remote
 	if methodInfo = svcInfo.MethodInfo(context.Background(), methodName); methodInfo == nil {
 		return remote.NewTransErrorWithMsg(remote.UnknownMethod, fmt.Sprintf("unknown method %s (service %s)", methodName, ink.ServiceName()))
 	}
+	if remote.UnaryCallFromContext(ctx) != nil && methodInfo.StreamingMode() != serviceinfo.StreamingNone {
+		return remote.ErrUnaryLifecycleProtocol
+	}
 	inkSetter.SetPackageName(svcInfo.GetPackageName())
 	inkSetter.SetServiceName(svcInfo.ServiceName)
 	inkSetter.SetMethodInfo(methodInfo)

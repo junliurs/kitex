@@ -25,6 +25,7 @@ import (
 
 	"github.com/cloudwego/kitex/pkg/generic/proto"
 	"github.com/cloudwego/kitex/pkg/generic/thrift"
+	"github.com/cloudwego/kitex/pkg/remote"
 	codecProto "github.com/cloudwego/kitex/pkg/remote/codec/protobuf"
 )
 
@@ -39,10 +40,11 @@ const (
 
 // Args generic request
 type Args struct {
-	Request interface{}
-	Method  string
-	base    *base.Base
-	inner   interface{}
+	payloadMetadata *thrift.PayloadMetadata
+	Request         interface{}
+	Method          string
+	base            *base.Base
+	inner           interface{}
 }
 
 var (
@@ -67,7 +69,7 @@ func (g *Args) Write(ctx context.Context, method string, out bufiox.Writer) erro
 		return err
 	}
 	if w, ok := g.inner.(thrift.MessageWriter); ok {
-		return w.Write(ctx, out, g.Request, method, true, g.base)
+		return w.Write(thrift.WithPayloadMetadata(ctx, g.payloadMetadata), out, g.Request, method, true, g.base)
 	}
 	return fmt.Errorf("unexpected Args writer type: %T", g.inner)
 }
@@ -90,7 +92,21 @@ func (g *Args) Read(ctx context.Context, method string, dataLen int, in bufiox.R
 	if rw, ok := g.inner.(thrift.MessageReader); ok {
 		g.Method = method
 		var err error
+		if call := remote.UnaryCallFromContext(ctx); call != nil && !call.RequestWire.WithTTHeader {
+			field, _, lookupErr := lookupPayloadMetadata(g.inner, method, false)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			g.payloadMetadata = &thrift.PayloadMetadata{Field: field, Received: true}
+			ctx = thrift.WithPayloadMetadata(ctx, g.payloadMetadata)
+		}
 		g.Request, err = rw.Read(ctx, method, false, dataLen, in)
+		if g.payloadMetadata != nil {
+			g.base = g.payloadMetadata.Request
+			if doc, ok := g.Request.(*thrift.PayloadJSON); ok {
+				g.Request = doc.Value
+			}
+		}
 		return err
 	}
 	return fmt.Errorf("unexpected Args reader type: %T", g.inner)
@@ -116,8 +132,9 @@ func (g *Args) GetFirstArgument() interface{} {
 
 // Result generic response
 type Result struct {
-	Success interface{}
-	inner   interface{}
+	payloadMetadata *thrift.PayloadMetadata
+	Success         interface{}
+	inner           interface{}
 }
 
 var (
@@ -136,7 +153,7 @@ func (r *Result) Write(ctx context.Context, method string, out bufiox.Writer) er
 		return err
 	}
 	if w, ok := r.inner.(thrift.MessageWriter); ok {
-		return w.Write(ctx, out, r.Success, method, false, nil)
+		return w.Write(thrift.WithPayloadMetadata(ctx, r.payloadMetadata), out, r.Success, method, false, nil)
 	}
 	return fmt.Errorf("unexpected Result writer type: %T", r.inner)
 }
@@ -158,7 +175,20 @@ func (r *Result) Read(ctx context.Context, method string, dataLen int, in bufiox
 	}
 	if w, ok := r.inner.(thrift.MessageReader); ok {
 		var err error
+		if call := remote.UnaryCallFromContext(ctx); call != nil && !call.ResponseWire.WithTTHeader {
+			field, _, lookupErr := lookupPayloadMetadata(r.inner, method, true)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			r.payloadMetadata = &thrift.PayloadMetadata{Field: field, Received: true}
+			ctx = thrift.WithPayloadMetadata(ctx, r.payloadMetadata)
+		}
 		r.Success, err = w.Read(ctx, method, true, dataLen, in)
+		if r.payloadMetadata != nil {
+			if doc, ok := r.Success.(*thrift.PayloadJSON); ok {
+				r.Success = doc.Value
+			}
+		}
 		return err
 	}
 	return fmt.Errorf("unexpected Result reader type: %T", r.inner)
