@@ -144,8 +144,8 @@ func checkReadable(t *testing.T, buf remote.ByteBuffer) {
 	test.Assert(t, n == 3*len(msg), n)
 
 	n = buf.ReadLen()
-	// The cursor consumed Skip(1+len(msg)) and Next(len(msg)-1); Peek consumes nothing.
-	test.Assert(t, n == 2*len(msg), n)
+	// ReadLen preserves the historical contract: Skip and Peek are excluded.
+	test.Assert(t, n == len(msg)-1, n)
 
 	s, err = buf.ReadString(len(msg))
 	test.Assert(t, err == nil, err)
@@ -217,4 +217,22 @@ func checkUnreadable(t *testing.T, buf remote.ByteBuffer) {
 
 	_, err = buf.Read(nil)
 	test.Assert(t, err != nil)
+}
+
+func TestUnaryConsumedLenPreservesLegacyReadLen(t *testing.T) {
+	b := netpoll.NewLinkBuffer()
+	_, _ = b.WriteBinary([]byte("0123456789tail"))
+	_ = b.Flush()
+	reader := NewReaderByteBuffer(b).(*netpollByteBuffer)
+	defer reader.Release(nil)
+	reader.BeginBorrowedMessage()
+	if err := reader.Skip(8); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.Next(2); err != nil {
+		t.Fatal(err)
+	}
+	if reader.ReadLen() != 2 || remote.ConsumedLen(reader) != 10 || b.Len() != 4 {
+		t.Fatal(reader.ReadLen(), remote.ConsumedLen(reader), b.Len())
+	}
 }

@@ -22,7 +22,7 @@ func TestUnaryBorrowedMessageUsesConsumedRangeAndNoUnselectedAllocation(t *testi
 	}
 	var scratch [4][]byte
 	parts := r.BorrowConsumedMessage(scratch[:0])
-	if len(parts) != 1 || !bytes.Equal(parts[0], []byte("message")) || r.ReadLen() != 7 {
+	if len(parts) != 1 || !bytes.Equal(parts[0], []byte("message")) || r.ReadLen() != 0 || r.ConsumedLen() != 7 {
 		t.Fatal("wrong message boundary", parts, r.ReadLen())
 	}
 	view := parts[0]

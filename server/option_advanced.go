@@ -42,7 +42,7 @@ import (
 
 func WithUnaryLifecycle(h remote.UnaryLifecycle) Option {
 	return Option{F: func(o *internal_server.Options, di *utils.Slice) {
-		o.RemoteOpt.UnaryLifecycle = h
+		o.UnaryLifecycle = h
 	}}
 }
 

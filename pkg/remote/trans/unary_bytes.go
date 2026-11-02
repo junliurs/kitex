@@ -384,3 +384,5 @@ func responseWire(raw []byte) remote.UnaryWire {
 	}
 	return w
 }
+
+func (b *metaCapture) ConsumedLen() int { return remote.ConsumedLen(b.ByteBuffer) }

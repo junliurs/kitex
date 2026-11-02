@@ -44,7 +44,7 @@ func (t *cliTransHandler) readGovernedResponse(ctx context.Context, conn net.Con
 	if err = codec.DecodeMeta(ctx, msg, reader); err != nil {
 		return reader, err
 	}
-	wireSize := uint64(reader.ReadLen() + msg.PayloadLen())
+	wireSize := uint64(remote.ConsumedLen(reader) + msg.PayloadLen())
 	if !call.ResponseWire.WithTTHeader {
 		if localReply {
 			if stats := rpcinfo.AsMutableRPCStats(msg.RPCInfo().Stats()); stats != nil {

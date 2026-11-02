@@ -128,16 +128,25 @@ func (p *ByteBufferIO) Read(b []byte) (n int, err error) {
 	} else if len(b) <= readable {
 		buf, err = p.buffer.Next(len(b))
 		if err != nil {
-			return
+			return n, err
 		}
 		n = len(b)
 	} else {
 		buf, err = p.buffer.Next(readable)
 		if err != nil {
-			return
+			return n, err
 		}
 		n = readable
 	}
 	copy(b, buf)
-	return
+	return n, err
+}
+
+// ConsumedLen is an opt-in wire-size query; ByteBuffer.ReadLen keeps its old
+// implementation-specific contract. Readers without marks use their own count.
+func ConsumedLen(reader ByteBuffer) int {
+	if r, ok := reader.(interface{ ConsumedLen() int }); ok {
+		return r.ConsumedLen()
+	}
+	return reader.ReadLen()
 }

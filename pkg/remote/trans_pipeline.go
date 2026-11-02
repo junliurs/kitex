@@ -168,3 +168,11 @@ func (p *TransPipeline) GracefulShutdown(ctx context.Context) error {
 	}
 	return nil
 }
+
+// UnaryLifecycle forwards cold initialization metadata from the real handler.
+func (p *TransPipeline) UnaryLifecycle() UnaryLifecycle {
+	if h, ok := p.netHdlr.(UnaryLifecycleProvider); ok {
+		return h.UnaryLifecycle()
+	}
+	return nil
+}

@@ -146,11 +146,12 @@ func (o *StreamOptions) BuildSendChain(sendEndpoint cep.StreamSendEndpoint) cep.
 
 // Options is used to initialize a client.
 type Options struct {
-	Cli     *rpcinfo.EndpointBasicInfo
-	Svr     *rpcinfo.EndpointBasicInfo
-	Configs rpcinfo.RPCConfig
-	Locks   *ConfigLocks
-	Once    *configutil.OptionOnce
+	UnaryLifecycle remote.UnaryLifecycle
+	Cli            *rpcinfo.EndpointBasicInfo
+	Svr            *rpcinfo.EndpointBasicInfo
+	Configs        rpcinfo.RPCConfig
+	Locks          *ConfigLocks
+	Once           *configutil.OptionOnce
 
 	UnaryOptions  UnaryOptions
 	StreamOptions StreamOptions

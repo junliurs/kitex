@@ -93,7 +93,7 @@ func (ts *transServer) BootstrapServer(ln net.Listener) (err error) {
 	}
 	ts.ln = ln
 	opts = append(opts, netpoll.WithOnPrepare(ts.onConnActive))
-	if ts.opt.UnaryLifecycle != nil {
+	if h, ok := ts.transHdlr.(remote.UnaryLifecycleProvider); ok && h.UnaryLifecycle() != nil {
 		opts = append(opts, netpoll.WithOnDisconnect(func(ctx context.Context, _ netpoll.Connection) {
 			remote.CancelUnaryConnection(ctx)
 		}))

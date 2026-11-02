@@ -36,3 +36,7 @@ func (f *svrTransHandlerFactory) NewTransHandler(opt *remote.ServerOption) (remo
 func newSvrTransHandler(opt *remote.ServerOption) (remote.ServerTransHandler, error) {
 	return trans.NewDefaultSvrTransHandler(opt, NewNetpollConnExtension())
 }
+
+func (f *svrTransHandlerFactory) NewUnaryTransHandler(opt *remote.ServerOption, lifecycle remote.UnaryLifecycle) (remote.ServerTransHandler, error) {
+	return trans.NewUnarySvrTransHandler(opt, NewNetpollConnExtension(), lifecycle)
+}

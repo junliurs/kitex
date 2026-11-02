@@ -292,12 +292,16 @@ func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message
 	defer func() {
 		if ri := message.RPCInfo(); ri != nil {
 			if ms := rpcinfo.AsMutableRPCStats(ri.Stats()); ms != nil {
-				ms.SetRecvSize(uint64(in.ReadLen()))
+				ms.SetRecvSize(uint64(messageConsumedLen(ctx, in)))
 			}
 		}
 	}()
 
-	hasRead := in.ReadLen()
+	readLen := in.ReadLen
+	if remote.UnaryCallFromContext(ctx) != nil {
+		readLen = func() int { return remote.ConsumedLen(in) }
+	}
+	hasRead := readLen()
 	pCodec, err := remote.GetPayloadCodec(message)
 	if err != nil {
 		return err
@@ -307,7 +311,7 @@ func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message
 	}
 	if message.PayloadLen() == 0 {
 		// if protocol is PurePayload, should set payload length after decoded
-		message.SetPayloadLen(in.ReadLen() - hasRead)
+		message.SetPayloadLen(readLen() - hasRead)
 	}
 	return nil
 }
@@ -509,4 +513,11 @@ func getWrittenBytes(lb *netpoll.LinkBuffer) (buf []byte, err error) {
 		return nil, err
 	}
 	return lb.Bytes(), nil
+}
+
+func messageConsumedLen(ctx context.Context, in remote.ByteBuffer) int {
+	if remote.UnaryCallFromContext(ctx) != nil {
+		return remote.ConsumedLen(in)
+	}
+	return in.ReadLen()
 }

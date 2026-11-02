@@ -51,9 +51,6 @@ type svrTransHandlerFactory struct {
 }
 
 func (f *svrTransHandlerFactory) NewTransHandler(opt *remote.ServerOption) (remote.ServerTransHandler, error) {
-	if opt.UnaryLifecycle != nil {
-		return f.defaultHandlerFactory.NewTransHandler(opt)
-	}
 	t := &svrTransHandler{}
 	var err error
 	for i := range f.detectableHandlerFactory {
@@ -184,4 +181,11 @@ type handlerKey struct{}
 type handlerWrapper struct {
 	ctx     context.Context
 	handler remote.ServerTransHandler
+}
+
+func (f *svrTransHandlerFactory) NewUnaryTransHandler(opt *remote.ServerOption, lifecycle remote.UnaryLifecycle) (remote.ServerTransHandler, error) {
+	if factory, ok := f.defaultHandlerFactory.(remote.UnaryServerTransHandlerFactory); ok {
+		return factory.NewUnaryTransHandler(opt, lifecycle)
+	}
+	return nil, remote.ErrUnaryLifecycleProtocol
 }

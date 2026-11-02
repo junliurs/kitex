@@ -37,7 +37,12 @@ import (
 
 // NewDefaultSvrTransHandler to provide default impl of svrTransHandler, it can be reused in netpoll, shm-ipc, framework-sdk extensions
 func NewDefaultSvrTransHandler(opt *remote.ServerOption, ext Extension) (remote.ServerTransHandler, error) {
-	if opt.UnaryLifecycle != nil {
+	return NewUnarySvrTransHandler(opt, ext, nil)
+}
+
+// NewUnarySvrTransHandler opts into governance without extending ServerOption.
+func NewUnarySvrTransHandler(opt *remote.ServerOption, ext Extension, lifecycle remote.UnaryLifecycle) (remote.ServerTransHandler, error) {
+	if lifecycle != nil {
 		if _, ok := opt.Codec.(interface {
 			PrepareUnaryWire(context.Context, remote.Message, *remote.UnaryCall) error
 		}); !ok {
@@ -45,6 +50,7 @@ func NewDefaultSvrTransHandler(opt *remote.ServerOption, ext Extension) (remote.
 		}
 	}
 	svrHdlr := &svrTransHandler{
+		lifecycle:   lifecycle,
 		opt:         opt,
 		codec:       opt.Codec,
 		svcSearcher: opt.SvcSearcher,
@@ -58,6 +64,7 @@ func NewDefaultSvrTransHandler(opt *remote.ServerOption, ext Extension) (remote.
 }
 
 type svrTransHandler struct {
+	lifecycle          remote.UnaryLifecycle
 	opt                *remote.ServerOption
 	svcSearcher        remote.ServiceSearcher
 	inkHdlFunc         endpoint.Endpoint
@@ -86,7 +93,10 @@ const (
 )
 
 func (s *unaryConnState) finishRetired(fact uint32) {
-	previous := s.retiredFacts.Or(fact)
+	previous := s.retiredFacts.Load()
+	for !s.retiredFacts.CompareAndSwap(previous, previous|fact) {
+		previous = s.retiredFacts.Load()
+	}
 	if previous&fact != 0 {
 		return
 	}
@@ -257,7 +267,7 @@ func (t *svrTransHandler) Read(ctx context.Context, conn net.Conn, recvMsg remot
 					call.ReadEnd, call.Started = time.Now(), true
 					call.FailureStage = remote.UnaryFailurePrepare
 					if ms := rpcinfo.AsMutableRPCStats(ri.Stats()); ms != nil {
-						ms.SetRecvSize(uint64(bufReader.ReadLen() + recvMsg.PayloadLen()))
+						ms.SetRecvSize(uint64(remote.ConsumedLen(bufReader) + recvMsg.PayloadLen()))
 					}
 					call.Err = admission.ServerHeaderReady(ctx, call)
 					if call.Err != nil {
@@ -410,8 +420,8 @@ func (t *svrTransHandler) OnRead(ctx context.Context, conn net.Conn) (err error)
 	var recvMsg remote.Message
 	var sendMsg remote.Message
 	var call *remote.UnaryCall
-	if t.opt.UnaryLifecycle != nil {
-		call = remote.NewUnaryCall(t.opt.UnaryLifecycle)
+	if t.lifecycle != nil {
+		call = remote.NewUnaryCall(t.lifecycle)
 		call.Conn = conn
 		if state, ok := ctx.Value(unaryConnKey{}).(*unaryConnState); ok {
 			call.ConnID, call.Reused = state.id, state.used
@@ -622,7 +632,7 @@ func (t *svrTransHandler) OnMessage(ctx context.Context, args, result remote.Mes
 
 // OnActive implements the remote.ServerTransHandler interface.
 func (t *svrTransHandler) OnActive(ctx context.Context, conn net.Conn) (context.Context, error) {
-	if t.opt.UnaryLifecycle != nil {
+	if t.lifecycle != nil {
 		ctx = remote.WithUnaryConnectionCancellation(ctx)
 		ctx = context.WithValue(ctx, unaryConnKey{}, &unaryConnState{id: remote.NextUnaryConnID()})
 	}
@@ -788,3 +798,6 @@ func getRemoteInfo(ri rpcinfo.RPCInfo, conn net.Conn) (string, net.Addr) {
 	}
 	return ri.From().ServiceName(), rAddr
 }
+
+// UnaryLifecycle is queried once when configuring the network server.
+func (t *svrTransHandler) UnaryLifecycle() remote.UnaryLifecycle { return t.lifecycle }

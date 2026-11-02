@@ -15,7 +15,7 @@ func (kc *kClient) unaryLifecycle() remote.UnaryLifecycle {
 	if kc.opt.RemoteOpt == nil {
 		return nil
 	}
-	return kc.opt.RemoteOpt.UnaryLifecycle
+	return kc.opt.UnaryLifecycle
 }
 
 func (kc *kClient) unaryLifecycleEndpoint(pipe remote.ClientTransHandler) (endpoint.Endpoint, error) {
@@ -100,7 +100,7 @@ func (kc *kClient) unaryLifecycleEndpoint(pipe remote.ClientTransHandler) (endpo
 		if err = remote.CheckUnaryLifecycle(ri); err != nil {
 			return err
 		}
-		call := remote.NewUnaryCall(kc.opt.RemoteOpt.UnaryLifecycle)
+		call := remote.NewUnaryCall(kc.opt.UnaryLifecycle)
 		ctx = remote.WithUnaryCall(ctx, call)
 		messageType := remote.Call
 		if method := ri.Invocation().MethodInfo(); method != nil && method.OneWay() {

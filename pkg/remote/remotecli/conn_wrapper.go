@@ -121,11 +121,18 @@ func (cm *ConnWrapper) getConnWithPool(ctx context.Context, cp remote.ConnPool, 
 		return nil, kerrors.ErrNoDestAddress
 	}
 	opt := remote.ConnOption{Dialer: d, ConnectTimeout: timeout}
-	if call := remote.UnaryCallFromContext(ctx); call != nil {
-		opt.Policy = call.ConnectionPolicy
-	}
 	ri.Stats().Record(ctx, stats.ClientConnStart, stats.StatusInfo, "")
-	conn, err := cp.Get(ctx, addr.Network(), addr.String(), opt)
+	var conn net.Conn
+	var err error
+	if call := remote.UnaryCallFromContext(ctx); call != nil && call.ConnectionPolicy.Enabled {
+		pool, ok := cp.(remote.ConnectionPolicyPool)
+		if !ok {
+			return nil, kerrors.ErrGetConnection.WithCause(remote.ErrUnaryLifecycleProtocol)
+		}
+		conn, err = pool.GetWithPolicy(ctx, addr.Network(), addr.String(), opt, call.ConnectionPolicy)
+	} else {
+		conn, err = cp.Get(ctx, addr.Network(), addr.String(), opt)
+	}
 	if err != nil {
 		ri.Stats().Record(ctx, stats.ClientConnFinish, stats.StatusError, err.Error())
 		return nil, kerrors.ErrGetConnection.WithCause(err)

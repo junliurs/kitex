@@ -31,8 +31,6 @@ import (
 
 // Option is used to pack the inbound and outbound handlers.
 type Option struct {
-	UnaryLifecycle UnaryLifecycle
-
 	Outbounds []OutboundHandler
 
 	Inbounds []InboundHandler

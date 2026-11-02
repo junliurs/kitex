@@ -50,7 +50,7 @@ type Streaming interface {
 
 // Stream implements the Streaming interface
 func (kc *kClient) Stream(ctx context.Context, method string, request, response interface{}) error {
-	if kc.opt.RemoteOpt.UnaryLifecycle != nil {
+	if kc.opt.UnaryLifecycle != nil {
 		return remote.ErrUnaryLifecycleProtocol
 	}
 	if !kc.inited {
@@ -117,7 +117,7 @@ func (kc *kClient) Stream(ctx context.Context, method string, request, response 
 
 // StreamX implements the Streaming interface
 func (kc *kClient) StreamX(ctx context.Context, method string) (streaming.ClientStream, error) {
-	if kc.opt.RemoteOpt.UnaryLifecycle != nil {
+	if kc.opt.UnaryLifecycle != nil {
 		return nil, remote.ErrUnaryLifecycleProtocol
 	}
 	if !kc.inited {

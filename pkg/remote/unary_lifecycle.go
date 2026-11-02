@@ -336,3 +336,17 @@ func (c *UnaryCall) PayloadExtra(raw string) (map[string]string, bool) {
 	}
 	return c.payloadExtraValues, true
 }
+
+// UnaryServerTransHandlerFactory is an opt-in constructor extension. The old
+// factory and public option layouts remain unchanged.
+type UnaryServerTransHandlerFactory interface {
+	NewUnaryTransHandler(*ServerOption, UnaryLifecycle) (ServerTransHandler, error)
+}
+
+// UnaryLifecycleProvider exposes initialization metadata, not a request hook.
+type UnaryLifecycleProvider interface{ UnaryLifecycle() UnaryLifecycle }
+
+// ConnectionPolicyPool adds per-attempt policy without changing ConnOption.
+type ConnectionPolicyPool interface {
+	GetWithPolicy(context.Context, string, string, ConnOption, ConnectionPolicy) (net.Conn, error)
+}

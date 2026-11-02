@@ -575,7 +575,16 @@ func doAddBoundHandler(h remote.BoundHandler, opt *remote.ServerOption) {
 
 func (s *server) newSvrTransHandler() (handler remote.ServerTransHandler, err error) {
 	transHdlrFactory := s.opt.RemoteOpt.SvrHandlerFactory
-	transHdlr, err := transHdlrFactory.NewTransHandler(s.opt.RemoteOpt)
+	var transHdlr remote.ServerTransHandler
+	if s.opt.UnaryLifecycle != nil {
+		factory, ok := transHdlrFactory.(remote.UnaryServerTransHandlerFactory)
+		if !ok {
+			return nil, remote.ErrUnaryLifecycleProtocol
+		}
+		transHdlr, err = factory.NewUnaryTransHandler(s.opt.RemoteOpt, s.opt.UnaryLifecycle)
+	} else {
+		transHdlr, err = transHdlrFactory.NewTransHandler(s.opt.RemoteOpt)
+	}
 	if err != nil {
 		return nil, err
 	}

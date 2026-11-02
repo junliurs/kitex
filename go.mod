@@ -51,4 +51,4 @@ require (
 
 replace github.com/cloudwego/gopkg => github.com/junliurs/cloudwego-gopkg v0.0.0-20261102103344-6e736f6767e7
 
-replace github.com/cloudwego/netpoll => github.com/junliurs/netpoll v0.7.4-0.20261102103401-5b0f4727023e
+replace github.com/cloudwego/netpoll => github.com/junliurs/netpoll v0.7.4-0.20261102150522-e39a71526a90

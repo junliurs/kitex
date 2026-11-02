@@ -107,10 +107,7 @@ func (b *netpollByteBuffer) Skip(n int) (err error) {
 	if b.status&remote.BitReadable == 0 {
 		return errors.New("unreadable buffer, cannot support Skip")
 	}
-	if err = b.reader.Skip(n); err == nil {
-		b.readSize += n
-	}
-	return err
+	return b.reader.Skip(n)
 }
 
 // ReadableLen returns the total length of readable buffer.
@@ -341,3 +338,14 @@ func (b *netpollByteBuffer) BorrowMessage(remaining int, dst [][]byte) ([][]byte
 }
 
 func (b *netpollByteBuffer) CanBorrowMessage() bool { return b.captureMarked }
+
+// ConsumedLen includes Skip using the cursor established for a unary message.
+// Legacy ReadLen remains unchanged, and old Skip does not pay for accounting.
+func (b *netpollByteBuffer) ConsumedLen() int {
+	if b.captureMarked {
+		if r, ok := b.reader.(interface{ ConsumedLen(netpoll.ReadMark) int }); ok {
+			return r.ConsumedLen(b.captureMark)
+		}
+	}
+	return b.ReadLen()
+}

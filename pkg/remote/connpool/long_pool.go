@@ -370,7 +370,7 @@ type LongPool struct {
 func (lp *LongPool) Get(ctx context.Context, network, address string, opt remote.ConnOption) (net.Conn, error) {
 	addr := netAddr{network, address}
 	p := lp.getPeer(addr)
-	return p.getPolicy(opt.Dialer, opt.ConnectTimeout, lp.reporter, address, opt.Policy)
+	return p.Get(opt.Dialer, opt.ConnectTimeout, lp.reporter, address)
 }
 
 func (*LongPool) SupportsConnectionPolicy() bool { return true }
@@ -485,4 +485,10 @@ func (lp *LongPool) getPeer(addr netAddr) *peer {
 	}
 	p, _ = lp.peerMap.LoadOrStore(addr, lp.newPeer(addr))
 	return p.(*peer)
+}
+
+// GetWithPolicy is the explicit governance path; Get keeps its legacy contract.
+func (lp *LongPool) GetWithPolicy(ctx context.Context, network, address string, opt remote.ConnOption, policy remote.ConnectionPolicy) (net.Conn, error) {
+	p := lp.getPeer(netAddr{network, address})
+	return p.getPolicy(opt.Dialer, opt.ConnectTimeout, lp.reporter, address, policy)
 }

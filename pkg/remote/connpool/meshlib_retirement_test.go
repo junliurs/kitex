@@ -173,9 +173,9 @@ func TestMeshlibPoolResetKeepsBorrowedIOAndRejectsOldReturns(t *testing.T) {
 
 func TestMeshlibConnectionPolicyBoundsAndExpiredActiveSocket(t *testing.T) {
 	p, opt := retirementPool(t)
-	opt.Policy = remote.ConnectionPolicy{Enabled: true, IdleTimeout: 10 * time.Millisecond, MaxIdleConnections: 1}
+	policy := remote.ConnectionPolicy{Enabled: true, IdleTimeout: 10 * time.Millisecond, MaxIdleConnections: 1}
 	get := func() *longConn {
-		c, err := p.Get(context.Background(), "tcp", "127.0.0.1:8099", opt)
+		c, err := p.GetWithPolicy(context.Background(), "tcp", "127.0.0.1:8099", opt, policy)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +193,7 @@ func TestMeshlibConnectionPolicyBoundsAndExpiredActiveSocket(t *testing.T) {
 		t.Fatal("active Netpoll-like socket reused after CP idle deadline")
 	}
 	_ = p.Discard(fresh)
-	opt.Policy.MaxIdleConnections = 0
+	policy.MaxIdleConnections = 0
 	c := get()
 	_ = p.Put(c)
 	if c.Conn.(*retirementConn).closed.Load() != 1 || p.globalIdle.Now() != 0 {
@@ -206,8 +206,7 @@ func TestMeshlibMixedPolicyDeadlinesAndBorrowedSnapshots(t *testing.T) {
 	long := remote.ConnectionPolicy{Enabled: true, IdleTimeout: time.Hour, MaxIdleConnections: 4}
 	short := remote.ConnectionPolicy{Enabled: true, IdleTimeout: 10 * time.Millisecond, MaxIdleConnections: 4}
 	get := func(policy remote.ConnectionPolicy) *longConn {
-		opt.Policy = policy
-		c, err := p.Get(context.Background(), "tcp", "127.0.0.1:8099", opt)
+		c, err := p.GetWithPolicy(context.Background(), "tcp", "127.0.0.1:8099", opt, policy)
 		if err != nil {
 			t.Fatal(err)
 		}

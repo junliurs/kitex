@@ -26,7 +26,6 @@ import (
 type ConnOption struct {
 	Dialer         Dialer
 	ConnectTimeout time.Duration
-	Policy         ConnectionPolicy
 }
 
 // Per-attempt constraints selected by governance. Framework idle/global limits
