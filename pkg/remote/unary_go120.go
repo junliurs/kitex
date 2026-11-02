@@ -8,5 +8,6 @@ import "context"
 // constructors keep their original Go 1.20 build and execution paths.
 const UnaryLifecycleSupported = false
 
-func withoutUnaryCancel(context.Context) context.Context         { panic(ErrUnaryLifecycleProtocol) }
+func withoutUnaryCancel(context.Context) context.Context { panic(ErrUnaryLifecycleProtocol) }
+
 func AfterUnaryCancellation(context.Context, func()) func() bool { panic(ErrUnaryLifecycleProtocol) }
