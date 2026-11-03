@@ -11,7 +11,7 @@ import (
 func TestUnaryFrameTransfersBackingBuffer(t *testing.T) {
 	wire := netpoll.NewLinkBuffer()
 	out := NewWriterByteBuffer(wire).(*netpollByteBuffer)
-	owner := out.NewUnaryFrameBuffer().(*unaryFrameBuffer)
+	owner := out.NewFrameBuffer().(*frameBuffer)
 	if err := owner.ReserveFrame(32768); err != nil {
 		t.Fatal(err)
 	}
@@ -20,12 +20,12 @@ func TestUnaryFrameTransfersBackingBuffer(t *testing.T) {
 	if wire.MallocLen() != 0 || wire.Len() != 0 {
 		t.Fatal("frame attached before plugin acceptance")
 	}
-	if err := out.CommitUnaryFrame(owner); err != nil {
+	if err := out.CommitFrame(owner); err != nil {
 		t.Fatal(err)
 	}
 	owner.Release(nil)
 	// A later allocation/reuse must not reclaim the transferred backing buffer.
-	other := out.NewUnaryFrameBuffer().(*unaryFrameBuffer)
+	other := out.NewFrameBuffer().(*frameBuffer)
 	other.ReserveFrame(32768)
 	p, _ := other.Malloc(16384)
 	copy(p, bytes.Repeat([]byte{0x55}, len(p)))
@@ -50,7 +50,7 @@ func TestUnaryFrameDiscardPreservesPendingOutput(t *testing.T) {
 	copy(old, "old")
 	wire.Flush()
 	out := NewWriterByteBuffer(wire).(*netpollByteBuffer)
-	owner := out.NewUnaryFrameBuffer().(*unaryFrameBuffer)
+	owner := out.NewFrameBuffer().(*frameBuffer)
 	owner.ReserveFrame(64)
 	p, _ := owner.Malloc(3)
 	copy(p, "new")
@@ -70,11 +70,11 @@ func (b *blockedFrameWriter) Flush() error { b.LinkBuffer.Flush(); return errors
 func TestUnaryFrameSurvivesFlushFailure(t *testing.T) {
 	wire := &blockedFrameWriter{netpoll.NewLinkBuffer()}
 	out := NewWriterByteBuffer(wire).(*netpollByteBuffer)
-	owner := out.NewUnaryFrameBuffer().(*unaryFrameBuffer)
+	owner := out.NewFrameBuffer().(*frameBuffer)
 	owner.ReserveFrame(64)
 	frame, _ := owner.Malloc(7)
 	copy(frame, "pending")
-	if err := out.CommitUnaryFrame(owner); err != nil {
+	if err := out.CommitFrame(owner); err != nil {
 		t.Fatal(err)
 	}
 	if out.Flush() == nil {

@@ -169,10 +169,9 @@ func (p *TransPipeline) GracefulShutdown(ctx context.Context) error {
 	return nil
 }
 
-// UnaryLifecycle forwards cold initialization metadata from the real handler.
-func (p *TransPipeline) UnaryLifecycle() UnaryLifecycle {
-	if h, ok := p.netHdlr.(UnaryLifecycleProvider); ok {
-		return h.UnaryLifecycle()
+// OnDisconnect forwards the peer event before final connection cleanup.
+func (p *TransPipeline) OnDisconnect(ctx context.Context, conn net.Conn) {
+	if h, ok := p.netHdlr.(DisconnectHandler); ok {
+		h.OnDisconnect(ctx, conn)
 	}
-	return nil
 }

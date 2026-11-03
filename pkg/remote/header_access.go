@@ -237,3 +237,15 @@ func (a HeaderAccess) DecodeTTHeader(ctx context.Context, in bufiox.Reader) (tth
 	}
 	return p, nil
 }
+
+// ResetDecodedHeaders clears decoded transport metadata before decoding a replacement frame.
+func ResetDecodedHeaders(msg Message) {
+	if ti, ok := msg.TransInfo().(*transInfo); ok {
+		for k := range ti.intInfo {
+			delete(ti.intInfo, k)
+		}
+		for k := range ti.strInfo {
+			delete(ti.strInfo, k)
+		}
+	}
+}

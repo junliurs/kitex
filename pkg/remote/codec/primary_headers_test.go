@@ -13,13 +13,6 @@ import (
 	"github.com/cloudwego/kitex/transport"
 )
 
-type primaryCodecLifecycle struct {
-	remote.UnaryLifecycle
-	enabled bool
-}
-
-func (h primaryCodecLifecycle) PrimaryUnaryHeaders() bool { return h.enabled }
-
 func TestPrimaryHeaderCodecRoundTrip(t *testing.T) {
 	for _, tb := range transportBuffers {
 		for _, response := range []bool{false, true} {
@@ -34,9 +27,7 @@ func TestPrimaryHeaderCodecRoundTrip(t *testing.T) {
 					name += "/legacy"
 				}
 				t.Run(name, func(t *testing.T) {
-					call := remote.NewUnaryCall(primaryCodecLifecycle{enabled: enabled})
-					defer call.Recycle()
-					ctx := remote.WithUnaryCall(context.Background(), call)
+					ctx := context.Background()
 					send := initClientSendMsg(transport.TTHeader)
 					if response {
 						remote.RecycleMessage(send)

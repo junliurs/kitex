@@ -95,7 +95,7 @@ func TestMapBytesResetKeepsAliases(t *testing.T) {
 	defer RecycleMessage(msg)
 	ints, strs := msg.TransInfo().TransIntInfo(), msg.TransInfo().TransStrInfo()
 	ints[9], strs["old"] = "old", "old"
-	ResetUnaryDecodedHeaders(msg)
+	ResetDecodedHeaders(msg)
 	if len(ints) != 0 || len(strs) != 0 {
 		t.Fatal("byte replacement retained old headers")
 	}

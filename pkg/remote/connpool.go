@@ -74,3 +74,8 @@ type RawConn interface {
 type IsActive interface {
 	IsActive() bool
 }
+
+// ConnectionPolicyPool supports a connection policy for an individual lease.
+type ConnectionPolicyPool interface {
+	GetWithPolicy(context.Context, string, string, ConnOption, ConnectionPolicy) (net.Conn, error)
+}

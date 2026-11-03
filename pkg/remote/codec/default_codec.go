@@ -128,7 +128,7 @@ func (c *defaultCodec) EncodePayload(ctx context.Context, message remote.Message
 	if err = c.encodePayload(ctx, message, out); err != nil {
 		return err
 	}
-	if remote.UnaryCallFromContext(ctx) != nil {
+	if remote.MessageEventHandlerFromContext(ctx) != nil {
 		message.SetPayloadLen(out.WrittenLen() - headerLen)
 	}
 
@@ -198,8 +198,8 @@ func (c *defaultCodec) EncodeMetaAndPayload(ctx context.Context, message remote.
 
 // Encode implements the remote.Codec interface, it does complete message encode include header and payload.
 func (c *defaultCodec) Encode(ctx context.Context, message remote.Message, out remote.ByteBuffer) (err error) {
-	if call := remote.UnaryCallFromContext(ctx); call != nil {
-		if err := c.PrepareUnaryWire(ctx, message, call); err != nil {
+	if remote.MessageEventHandlerFromContext(ctx) != nil {
+		if err := c.PrepareMessage(ctx, message); err != nil {
 			return err
 		}
 	}
@@ -241,51 +241,32 @@ func (c *defaultCodec) DecodeMeta(ctx context.Context, message remote.Message, i
 	if err = checkPayload(flagBuf, message, in, isTTHeader, c.MaxSize); err != nil {
 		return err
 	}
-	if call := remote.UnaryCallFromContext(ctx); call != nil {
+	if h := remote.MessageEventHandlerFromContext(ctx); h != nil {
 		framed := isThriftFramedBinary(flagBuf) || isProtobufKitex(flagBuf)
+		wire := remote.WireInfo{WithTTHeader: isTTHeader, Framed: framed}
 		if message.RPCInfo().Config().PayloadCodec() == serviceinfo.Thrift {
 			prefix := flagBuf
 			if framed {
 				prefix = flagBuf[Size32:]
 			}
-			messageType := binary.BigEndian.Uint32(prefix[:Size32]) & 0xff
-			if err = UpdateMsgType(messageType, message); err != nil {
-				return err
-			}
-			if message.RPCRole() == remote.Server {
-				call.RequestWire.MessageType = messageType
-			} else {
-				call.ResponseWire.MessageType = messageType
-			}
+			wire.MessageType = binary.BigEndian.Uint32(prefix[:Size32]) & 0xff
 		}
-		if message.RPCRole() == remote.Server {
-			call.RequestWire.Framed = framed
-			call.RequestWire.WithTTHeader = isTTHeader
-		} else {
-			call.ResponseWire.Framed = framed
-			call.ResponseWire.WithTTHeader = isTTHeader
+		if err = h.OnMessageEvent(ctx, message, remote.MessageDecodeMeta, wire); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 // DecodePayload decode payload
-func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message, in remote.ByteBuffer) error {
-	if call := remote.UnaryCallFromContext(ctx); call != nil {
-		if err := remote.CheckUnaryLifecycle(message.RPCInfo()); err != nil {
+func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message, in remote.ByteBuffer) (err error) {
+	if h := remote.MessageEventHandlerFromContext(ctx); h != nil {
+		if err := h.OnMessageEvent(ctx, message, remote.MessageDecodePayload, remote.WireInfo{}); err != nil {
 			return err
 		}
 		defer func() {
-			if message.RPCRole() == remote.Client {
-				call.ResponseWire.MessageType = uint32(message.MessageType())
-				if !call.ResponseWire.WithTTHeader {
-					call.ResponseWire.SeqID = message.RPCInfo().Invocation().SeqID()
-				}
-			} else {
-				call.RequestWire.MessageType = uint32(message.MessageType())
-				if !call.RequestWire.WithTTHeader {
-					call.RequestWire.SeqID = message.RPCInfo().Invocation().SeqID()
-				}
+			if eventErr := h.OnMessageEvent(ctx, message, remote.MessageDecodePayloadDone, remote.WireInfo{}); err == nil {
+				err = eventErr
 			}
 		}()
 	}
@@ -298,7 +279,7 @@ func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message
 	}()
 
 	readLen := in.ReadLen
-	if remote.UnaryCallFromContext(ctx) != nil {
+	if remote.MessageEventHandlerFromContext(ctx) != nil {
 		readLen = func() int { return remote.ConsumedLen(in) }
 	}
 	hasRead := readLen()
@@ -516,7 +497,7 @@ func getWrittenBytes(lb *netpoll.LinkBuffer) (buf []byte, err error) {
 }
 
 func messageConsumedLen(ctx context.Context, in remote.ByteBuffer) int {
-	if remote.UnaryCallFromContext(ctx) != nil {
+	if remote.MessageEventHandlerFromContext(ctx) != nil {
 		return remote.ConsumedLen(in)
 	}
 	return in.ReadLen()

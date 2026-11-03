@@ -12,7 +12,6 @@ import (
 
 	"github.com/cloudwego/kitex/pkg/generic/descriptor"
 	genericthrift "github.com/cloudwego/kitex/pkg/generic/thrift"
-	"github.com/cloudwego/kitex/pkg/remote"
 )
 
 func metadataDescriptor() *descriptor.ServiceDescriptor {
@@ -61,14 +60,8 @@ func requestMetadataBytes(present bool) []byte {
 	return metadataFieldBytes(7, req)
 }
 
-func metadataContext(response bool) (context.Context, *remote.UnaryCall) {
-	c := remote.NewUnaryCall(nil)
-	if response {
-		c.ResponseWire = remote.UnaryWire{Framed: true}
-	} else {
-		c.RequestWire = remote.UnaryWire{Framed: true}
-	}
-	return remote.WithUnaryCall(context.Background(), c), c
+func metadataContext() context.Context {
+	return genericthrift.WithPayloadMetadataEnabled(context.Background())
 }
 
 func TestUnaryGenericMetadataReadsActualFieldAndOwnsStrings(t *testing.T) {
@@ -77,8 +70,7 @@ func TestUnaryGenericMetadataReadsActualFieldAndOwnsStrings(t *testing.T) {
 	raw := requestMetadataBytes(true)
 	in := bufiox.NewBytesReader(raw)
 	defer in.Release(nil)
-	ctx, c := metadataContext(false)
-	defer c.Recycle()
+	ctx := metadataContext()
 	if err := a.Read(ctx, "Visit", len(raw), in); err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +92,7 @@ func TestUnaryGenericMetadataReadsActualFieldAndOwnsStrings(t *testing.T) {
 func TestUnaryGenericMetadataAbsenceOverridesDecoderDefaultsAndPreviousCall(t *testing.T) {
 	a := &Args{}
 	a.SetCodec(genericthrift.NewStructReaderWriter(metadataDescriptor()))
-	ctx, c := metadataContext(false)
-	defer c.Recycle()
+	ctx := metadataContext()
 	for _, present := range []bool{true, false} {
 		raw := requestMetadataBytes(present)
 		in := bufiox.NewBytesReader(raw)
@@ -123,8 +114,7 @@ func TestUnaryGenericMetadataAbsenceOverridesDecoderDefaultsAndPreviousCall(t *t
 func TestUnaryGenericResponseMetadataKeepsBusinessCodeAndTracksAbsence(t *testing.T) {
 	result := &Result{}
 	result.SetCodec(genericthrift.NewStructReaderWriter(metadataDescriptor()))
-	ctx, c := metadataContext(true)
-	defer c.Recycle()
+	ctx := metadataContext()
 	for _, present := range []bool{true, false} {
 		response := []byte{0}
 		if present {
@@ -194,8 +184,7 @@ func TestUnaryGenericMetadataSharesCodecTraversalAndDefersJSON(t *testing.T) {
 		raw := requestMetadataBytes(true)
 		reader := &noMetadataRescan{Reader: bufiox.NewBytesReader(raw), whole: len(raw)}
 		defer reader.Release(nil)
-		ctx, c := metadataContext(false)
-		c.RequestWire.Framed = false
+		ctx := metadataContext()
 		if err := a.Read(ctx, "Visit", 0, reader); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +209,6 @@ func TestUnaryGenericMetadataSharesCodecTraversalAndDefersJSON(t *testing.T) {
 				t.Fatal("materialized again", err)
 			}
 		}
-		c.Recycle()
 	}
 }
 
@@ -251,8 +239,7 @@ func TestUnaryGenericMetadataAuthorityPrecedesBusinessMappingsAndDefaults(t *tes
 		}
 		in := bufiox.NewBytesReader(raw)
 		defer in.Release(nil)
-		ctx, c := metadataContext(false)
-		defer c.Recycle()
+		ctx := metadataContext()
 		if err := a.Read(ctx, "Visit", len(raw), in); err != nil {
 			t.Fatal(err)
 		}

@@ -182,10 +182,3 @@ type handlerWrapper struct {
 	ctx     context.Context
 	handler remote.ServerTransHandler
 }
-
-func (f *svrTransHandlerFactory) NewUnaryTransHandler(opt *remote.ServerOption, lifecycle remote.UnaryLifecycle) (remote.ServerTransHandler, error) {
-	if factory, ok := f.defaultHandlerFactory.(remote.UnaryServerTransHandlerFactory); ok {
-		return factory.NewUnaryTransHandler(opt, lifecycle)
-	}
-	return nil, remote.ErrUnaryLifecycleProtocol
-}

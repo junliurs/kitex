@@ -85,7 +85,7 @@ func (t ttHeader) encode(ctx context.Context, message remote.Message, out remote
 	if reserve, ok := out.(interface{ ReserveFrame(int) error }); ok {
 		data, ok := message.Data().(interface{ BLength() int })
 		if !ok {
-			return nil, fmt.Errorf("unary frame needs a sized payload")
+			return nil, fmt.Errorf("frame reservation requires a sized payload")
 		}
 		ints, strings := headers.LegacyMaps()
 		h, ns := 2, 0
@@ -129,12 +129,9 @@ func (t ttHeader) decode(ctx context.Context, message remote.Message, in remote.
 	if err != nil {
 		return perrors.NewProtocolError(err)
 	}
-	if call := remote.UnaryCallFromContext(ctx); call != nil {
-		wire := remote.UnaryWire{SeqID: param.SeqID, ProtocolID: uint16(param.ProtocolID), Flags: uint16(param.Flags)}
-		if message.RPCRole() == remote.Server {
-			call.RequestWire = wire
-		} else {
-			call.ResponseWire = wire
+	if h := remote.MessageEventHandlerFromContext(ctx); h != nil {
+		if err = h.OnMessageEvent(ctx, message, remote.MessageDecodeHeader, remote.WireInfo{SeqID: param.SeqID, ProtocolID: uint16(param.ProtocolID), Flags: uint16(param.Flags)}); err != nil {
+			return err
 		}
 	}
 	setFlags(param.Flags, message)

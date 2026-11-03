@@ -37,7 +37,7 @@ type transMetaHandler struct {
 
 // Write exec before encode
 func (h *transMetaHandler) Write(ctx context.Context, conn net.Conn, sendMsg remote.Message) (context.Context, error) {
-	if c := remote.UnaryCallFromContext(ctx); c != nil && c.MetaPrepared && sendMsg.RPCRole() == remote.Client {
+	if prepared, _ := sendMsg.Tags()[remote.MetaPrepared].(bool); prepared {
 		return ctx, nil
 	}
 	remote.PreparePrimaryHeaders(ctx, sendMsg, sendMsg.RPCRole() == remote.Server)

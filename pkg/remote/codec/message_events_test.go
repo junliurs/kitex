@@ -3,6 +3,7 @@ package codec
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -26,14 +27,13 @@ func TestUnaryWireMetadata(t *testing.T) {
 				send.RPCInfo().Invocation().(rpcinfo.InvocationSetter).SetSeqID(33)
 				send.RPCInfo().Invocation().(rpcinfo.InvocationSetter).SetMethodName(mockMethod)
 				send.Tags()[HeaderFlagsKey] = HeaderFlagDuplexReverse
-				call := remote.NewUnaryCall(nil)
-				defer call.Recycle()
-				ctx = remote.WithUnaryCall(ctx, call)
+				call := new(wireEvents)
+				ctx = context.WithValue(ctx, remote.TransportContextKey{}, call)
 				codec := &defaultCodec{}
-				if err := codec.PrepareUnaryWire(ctx, send, call); err != nil {
+				if err := codec.PrepareMessage(ctx, send); err != nil {
 					t.Fatal(err)
 				}
-				want := remote.UnaryWire{WithTTHeader: true, Framed: tp&transport.Framed != 0, SeqID: 33, ProtocolID: uint16(ProtocolIDDefault), Flags: uint16(HeaderFlagDuplexReverse), MessageType: uint32(send.MessageType())}
+				want := remote.WireInfo{WithTTHeader: true, Framed: tp&transport.Framed != 0, SeqID: 33, ProtocolID: uint16(ProtocolIDDefault), Flags: uint16(HeaderFlagDuplexReverse), MessageType: uint32(send.MessageType())}
 				got := call.RequestWire
 				if role == remote.Server {
 					got = call.ResponseWire
@@ -100,9 +100,8 @@ func TestUnaryWireMetadataFramed(t *testing.T) {
 	defer remote.RecycleMessage(send)
 	send.SetPayloadCodec(mpc)
 	send.RPCInfo().Invocation().(rpcinfo.InvocationSetter).SetSeqID(33)
-	call := remote.NewUnaryCall(nil)
-	defer call.Recycle()
-	ctx := remote.WithUnaryCall(context.Background(), call)
+	call := new(wireEvents)
+	ctx := context.WithValue(context.Background(), remote.TransportContextKey{}, call)
 	out := remote.NewWriterBuffer(32 << 10)
 	defer out.Release(nil)
 	codec := &defaultCodec{}
@@ -132,5 +131,71 @@ func TestUnaryWireMetadataFramed(t *testing.T) {
 	}
 	if call.RequestWire.SeqID != 33 || call.RequestWire.MessageType != uint32(remote.Call) {
 		t.Fatal("missing Framed envelope facts", call.RequestWire)
+	}
+}
+
+type wireEvents struct{ RequestWire, ResponseWire remote.WireInfo }
+
+func (h *wireEvents) OnMessageEvent(_ context.Context, msg remote.Message, event remote.MessageEvent, wire remote.WireInfo) error {
+	w := &h.ResponseWire
+	if (event == remote.MessageEncode && msg.RPCRole() == remote.Client) || (event != remote.MessageEncode && msg.RPCRole() == remote.Server) {
+		w = &h.RequestWire
+	}
+	switch event {
+	case remote.MessageEncode, remote.MessageDecodeHeader:
+		*w = wire
+	case remote.MessageDecodeMeta:
+		w.WithTTHeader, w.Framed, w.MessageType = wire.WithTTHeader, wire.Framed, wire.MessageType
+		return UpdateMsgType(wire.MessageType, msg)
+	case remote.MessageDecodePayloadDone:
+		w.MessageType = uint32(msg.MessageType())
+		if !w.WithTTHeader {
+			w.SeqID = msg.RPCInfo().Invocation().SeqID()
+		}
+	}
+	return nil
+}
+
+type failingPayload struct {
+	remote.PayloadCodec
+	err error
+}
+
+func (p failingPayload) Unmarshal(context.Context, remote.Message, remote.ByteBuffer) error {
+	return p.err
+}
+
+type completionEvents struct {
+	err  error
+	done bool
+}
+
+func (h *completionEvents) OnMessageEvent(_ context.Context, _ remote.Message, event remote.MessageEvent, _ remote.WireInfo) error {
+	if event == remote.MessageDecodePayloadDone {
+		h.done = true
+		return h.err
+	}
+	return nil
+}
+
+func TestPayloadCompletionPreservesDecoderError(t *testing.T) {
+	decoderErr := errors.New("decoder failed")
+	completionErr := errors.New("completion failed")
+	for _, original := range []error{nil, decoderErr} {
+		msg := initClientRecvMsg()
+		msg.SetPayloadCodec(failingPayload{PayloadCodec: mpc, err: original})
+		h := &completionEvents{err: completionErr}
+		ctx := context.WithValue(context.Background(), remote.TransportContextKey{}, h)
+		in := remote.NewReaderBuffer(nil)
+		err := (&defaultCodec{}).DecodePayload(ctx, msg, in)
+		in.Release(nil)
+		remote.RecycleMessage(msg)
+		want := original
+		if want == nil {
+			want = completionErr
+		}
+		if !h.done || !errors.Is(err, want) {
+			t.Fatalf("completion=%v error=%v, want %v", h.done, err, want)
+		}
 	}
 }

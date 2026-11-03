@@ -93,10 +93,8 @@ func (ts *transServer) BootstrapServer(ln net.Listener) (err error) {
 	}
 	ts.ln = ln
 	opts = append(opts, netpoll.WithOnPrepare(ts.onConnActive))
-	if h, ok := ts.transHdlr.(remote.UnaryLifecycleProvider); ok && h.UnaryLifecycle() != nil {
-		opts = append(opts, netpoll.WithOnDisconnect(func(ctx context.Context, _ netpoll.Connection) {
-			remote.CancelUnaryConnection(ctx)
-		}))
+	if h, ok := ts.transHdlr.(remote.DisconnectHandler); ok {
+		opts = append(opts, netpoll.WithOnDisconnect(func(ctx context.Context, conn netpoll.Connection) { h.OnDisconnect(ctx, conn) }))
 	}
 	ts.evl, err = netpoll.NewEventLoop(ts.onConnRead, opts...)
 	if err == nil {

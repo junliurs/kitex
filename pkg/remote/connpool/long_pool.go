@@ -81,7 +81,7 @@ type longConn struct {
 
 func (c *longConn) ConnID() uint64 {
 	if c.id == 0 {
-		c.id = remote.NextUnaryConnID()
+		c.id = remote.NextConnID()
 	}
 	return c.id
 }

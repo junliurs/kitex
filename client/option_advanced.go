@@ -40,9 +40,12 @@ import (
 	"github.com/cloudwego/kitex/pkg/utils"
 )
 
-func WithUnaryLifecycle(h remote.UnaryLifecycle) Option {
+// WithUnaryTransport installs an endpoint that owns unary resolution and timeout
+// execution. It cannot be combined with a proxy or connection warmup.
+func WithUnaryTransport(h remote.UnaryTransport) Option {
 	return Option{F: func(o *client.Options, di *utils.Slice) {
-		o.UnaryLifecycle = h
+		di.Push(fmt.Sprintf("WithUnaryTransport(%T)", h))
+		o.UnaryTransport = h
 	}}
 }
 

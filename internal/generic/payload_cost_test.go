@@ -12,7 +12,6 @@ import (
 
 	"github.com/cloudwego/kitex/pkg/generic/descriptor"
 	genericthrift "github.com/cloudwego/kitex/pkg/generic/thrift"
-	"github.com/cloudwego/kitex/pkg/remote"
 )
 
 type (
@@ -77,7 +76,7 @@ func payloadCostRead(ctx context.Context, codec interface{}, raw []byte, patch b
 	if err := a.Read(ctx, "Visit", 0, reader); err != nil {
 		return nil, reader.cost, err
 	}
-	if remote.UnaryCallFromContext(ctx) != nil {
+	if genericthrift.PayloadMetadataEnabled(ctx) {
 		_, base, received, err := a.RequestBaseMetadata("Visit")
 		if err != nil || !received || base == nil {
 			return nil, reader.cost, fmt.Errorf("metadata: %v %v", received, err)
@@ -108,9 +107,7 @@ func TestUnaryPayloadCostSingleTraversal(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				c := remote.NewUnaryCall(nil)
-				defer c.Recycle()
-				ctx := remote.WithUnaryCall(context.Background(), c)
+				ctx := genericthrift.WithPayloadMetadataEnabled(context.Background())
 				for _, patch := range []bool{false, true} {
 					a, observed, err := payloadCostRead(ctx, codec, raw, patch)
 					if err != nil {
@@ -149,9 +146,7 @@ func BenchmarkUnaryPayloadCodecCost(b *testing.B) {
 					codec := payloadCostCodec(svc, jsonMode)
 					ctx := context.Background()
 					if mode != "codec" {
-						c := remote.NewUnaryCall(nil)
-						defer c.Recycle()
-						ctx = remote.WithUnaryCall(ctx, c)
+						ctx = genericthrift.WithPayloadMetadataEnabled(ctx)
 					}
 					b.ReportAllocs()
 					b.SetBytes(int64(len(raw)))

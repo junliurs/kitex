@@ -1,6 +1,7 @@
 package thrift
 
 import (
+	"context"
 	"fmt"
 
 	wire "github.com/cloudwego/gopkg/protocol/thrift"
@@ -101,4 +102,15 @@ func payloadStructField(body []byte, wanted int16) ([]byte, bool, error) {
 		at += size
 	}
 	return nil, false, fmt.Errorf("unterminated metadata container")
+}
+
+// WithPayloadMetadataEnabled enables IDL metadata projection during decoding.
+type payloadMetadataEnabledKey struct{}
+
+func WithPayloadMetadataEnabled(ctx context.Context) context.Context {
+	return context.WithValue(ctx, payloadMetadataEnabledKey{}, true)
+}
+func PayloadMetadataEnabled(ctx context.Context) bool {
+	enabled, _ := ctx.Value(payloadMetadataEnabledKey{}).(bool)
+	return enabled
 }

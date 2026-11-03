@@ -129,11 +129,10 @@ type Option struct {
 
 // Options is used to initialize the server.
 type Options struct {
-	UnaryLifecycle remote.UnaryLifecycle
-	Svr            *rpcinfo.EndpointBasicInfo
-	Configs        rpcinfo.RPCConfig
-	LockBits       int
-	Once           *configutil.OptionOnce
+	Svr      *rpcinfo.EndpointBasicInfo
+	Configs  rpcinfo.RPCConfig
+	LockBits int
+	Once     *configutil.OptionOnce
 
 	UnaryOptions  UnaryOptions
 	StreamOptions StreamOptions

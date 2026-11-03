@@ -43,8 +43,6 @@ type ConnReleaser interface {
 
 // ConnWrapper wraps a connection.
 type ConnWrapper struct {
-	reuseOneway bool // Lifecycle verified the no-response protocol and final reuse decision.
-
 	connPool remote.ConnPool
 	conn     net.Conn
 }
@@ -87,7 +85,7 @@ func (cm *ConnWrapper) ReleaseConn(err error, ri rpcinfo.RPCInfo) {
 	if cm.connPool != nil {
 		if err == nil {
 			_, ok := ri.To().Tag(rpcinfo.ConnResetTag)
-			if ok || (ri.Config().InteractionMode() == rpcinfo.Oneway && !cm.reuseOneway) {
+			if ok || ri.Config().InteractionMode() == rpcinfo.Oneway {
 				cm.connPool.Discard(cm.conn)
 			} else {
 				cm.connPool.Put(cm.conn)
@@ -108,7 +106,6 @@ func newConnWrapper() interface{} {
 }
 
 func (cm *ConnWrapper) zero() {
-	cm.reuseOneway = false
 	cm.connPool = nil
 	cm.conn = nil
 }
@@ -122,17 +119,7 @@ func (cm *ConnWrapper) getConnWithPool(ctx context.Context, cp remote.ConnPool, 
 	}
 	opt := remote.ConnOption{Dialer: d, ConnectTimeout: timeout}
 	ri.Stats().Record(ctx, stats.ClientConnStart, stats.StatusInfo, "")
-	var conn net.Conn
-	var err error
-	if call := remote.UnaryCallFromContext(ctx); call != nil && call.ConnectionPolicy.Enabled {
-		pool, ok := cp.(remote.ConnectionPolicyPool)
-		if !ok {
-			return nil, kerrors.ErrGetConnection.WithCause(remote.ErrUnaryLifecycleProtocol)
-		}
-		conn, err = pool.GetWithPolicy(ctx, addr.Network(), addr.String(), opt, call.ConnectionPolicy)
-	} else {
-		conn, err = cp.Get(ctx, addr.Network(), addr.String(), opt)
-	}
+	conn, err := cp.Get(ctx, addr.Network(), addr.String(), opt)
 	if err != nil {
 		ri.Stats().Record(ctx, stats.ClientConnFinish, stats.StatusError, err.Error())
 		return nil, kerrors.ErrGetConnection.WithCause(err)

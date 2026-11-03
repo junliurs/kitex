@@ -41,7 +41,7 @@ func TestUnaryCaptureEncoderRetainsDirectPayload(t *testing.T) {
 	defer wire.Close()
 	out := NewWriterByteBuffer(wire).(*netpollByteBuffer)
 	defer out.Release(nil)
-	owner := out.NewCaptureFrameBuffer().(*captureFrameBuffer)
+	owner := out.NewObservedFrameBuffer().(*captureFrameBuffer)
 	defer owner.Release(nil)
 	payload := bytes.Repeat([]byte("payload"), 20000)
 	buf, err := owner.Malloc(4 + len(payload))
@@ -63,7 +63,7 @@ func TestUnaryCaptureEncoderRetainsDirectPayload(t *testing.T) {
 	if len(parts) != 2 || string(parts[0]) != "head" || len(parts[1]) != len(payload) || &parts[1][0] != &payload[0] {
 		t.Fatal("encoder copied or reordered direct payload", len(parts))
 	}
-	if err = out.CommitUnaryFrame(owner); err != nil {
+	if err = out.CommitFrame(owner); err != nil {
 		t.Fatal(err)
 	}
 	if err = out.Flush(); err != nil {

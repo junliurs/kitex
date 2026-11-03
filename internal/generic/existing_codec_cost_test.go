@@ -11,12 +11,11 @@ import (
 
 	"github.com/cloudwego/kitex/pkg/generic/descriptor"
 	genericthrift "github.com/cloudwego/kitex/pkg/generic/thrift"
-	"github.com/cloudwego/kitex/pkg/remote"
 )
 
 // This intentionally uses only APIs shared with the pre-Buffered revision.
 // Both arms decode the same framed body and return the same wire metadata.
-func BenchmarkMeshlibExistingCodec(b *testing.B) {
+func BenchmarkPayloadMetadataExistingCodec(b *testing.B) {
 	for _, size := range []int{64, 131072} {
 		for _, jsonMode := range []bool{false, true} {
 			for _, withHeader := range []bool{false, true} {
@@ -34,10 +33,10 @@ func BenchmarkMeshlibExistingCodec(b *testing.B) {
 					if jsonMode {
 						codec = genericthrift.NewJsonReaderWriter(svc)
 					}
-					c := remote.NewUnaryCall(nil)
-					defer c.Recycle()
-					c.RequestWire = remote.UnaryWire{Framed: true, WithTTHeader: withHeader}
-					ctx := remote.WithUnaryCall(context.Background(), c)
+					ctx := context.Background()
+					if !withHeader {
+						ctx = genericthrift.WithPayloadMetadataEnabled(ctx)
+					}
 					b.ReportAllocs()
 					b.SetBytes(int64(len(raw)))
 					b.ResetTimer()

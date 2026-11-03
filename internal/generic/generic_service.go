@@ -25,7 +25,6 @@ import (
 
 	"github.com/cloudwego/kitex/pkg/generic/proto"
 	"github.com/cloudwego/kitex/pkg/generic/thrift"
-	"github.com/cloudwego/kitex/pkg/remote"
 	codecProto "github.com/cloudwego/kitex/pkg/remote/codec/protobuf"
 )
 
@@ -92,7 +91,7 @@ func (g *Args) Read(ctx context.Context, method string, dataLen int, in bufiox.R
 	if rw, ok := g.inner.(thrift.MessageReader); ok {
 		g.Method = method
 		var err error
-		if call := remote.UnaryCallFromContext(ctx); call != nil && !call.RequestWire.WithTTHeader {
+		if thrift.PayloadMetadataEnabled(ctx) {
 			field, _, lookupErr := lookupPayloadMetadata(g.inner, method, false)
 			if lookupErr != nil {
 				return lookupErr
@@ -175,7 +174,7 @@ func (r *Result) Read(ctx context.Context, method string, dataLen int, in bufiox
 	}
 	if w, ok := r.inner.(thrift.MessageReader); ok {
 		var err error
-		if call := remote.UnaryCallFromContext(ctx); call != nil && !call.ResponseWire.WithTTHeader {
+		if thrift.PayloadMetadataEnabled(ctx) {
 			field, _, lookupErr := lookupPayloadMetadata(r.inner, method, true)
 			if lookupErr != nil {
 				return lookupErr

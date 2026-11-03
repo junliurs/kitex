@@ -35,7 +35,7 @@ type shortConn struct {
 
 func (sc *shortConn) ConnID() uint64 {
 	if sc.id == 0 {
-		sc.id = remote.NextUnaryConnID()
+		sc.id = remote.NextConnID()
 	}
 	return sc.id
 }

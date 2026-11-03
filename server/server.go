@@ -346,11 +346,13 @@ func (s *server) unaryOrStreamEndpoint(ctx context.Context) endpoint.Endpoint {
 
 func (s *server) invokeHandleEndpoint() endpoint.UnaryEndpoint {
 	return func(ctx context.Context, args, resp interface{}) (err error) {
-		business, enterErr := remote.BeginUnaryBusiness(ctx)
+		business, enterErr := remote.BeginInvocation(ctx)
 		if enterErr != nil {
 			return enterErr
 		}
-		defer func() { business.End(err) }()
+		if business != nil {
+			defer func() { business.End(err) }()
+		}
 		ri := rpcinfo.GetRPCInfo(ctx)
 		ink := ri.Invocation()
 		methodName := ink.MethodName()
@@ -575,16 +577,7 @@ func doAddBoundHandler(h remote.BoundHandler, opt *remote.ServerOption) {
 
 func (s *server) newSvrTransHandler() (handler remote.ServerTransHandler, err error) {
 	transHdlrFactory := s.opt.RemoteOpt.SvrHandlerFactory
-	var transHdlr remote.ServerTransHandler
-	if s.opt.UnaryLifecycle != nil {
-		factory, ok := transHdlrFactory.(remote.UnaryServerTransHandlerFactory)
-		if !ok {
-			return nil, remote.ErrUnaryLifecycleProtocol
-		}
-		transHdlr, err = factory.NewUnaryTransHandler(s.opt.RemoteOpt, s.opt.UnaryLifecycle)
-	} else {
-		transHdlr, err = transHdlrFactory.NewTransHandler(s.opt.RemoteOpt)
-	}
+	transHdlr, err := transHdlrFactory.NewTransHandler(s.opt.RemoteOpt)
 	if err != nil {
 		return nil, err
 	}
