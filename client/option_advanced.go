@@ -40,8 +40,20 @@ import (
 	"github.com/cloudwego/kitex/pkg/utils"
 )
 
-// WithUnaryTransport installs an endpoint that owns unary resolution and timeout
-// execution. It cannot be combined with a proxy or connection warmup.
+// MiddlewareConfig independently controls the client's framework middleware.
+type MiddlewareConfig = client.MiddlewareConfig
+
+// WithMiddlewareConfig explicitly configures the framework middleware chain.
+func WithMiddlewareConfig(config MiddlewareConfig) Option {
+	return Option{F: func(o *client.Options, di *utils.Slice) {
+		di.Push(fmt.Sprintf("WithMiddlewareConfig(%+v)", config))
+		o.MiddlewareConfig = config
+	}}
+}
+
+// WithUnaryTransport replaces the unary endpoint. Middleware configuration is
+// independent and can be selected with WithMiddlewareConfig. It cannot be
+// combined with a proxy or connection warmup.
 func WithUnaryTransport(h remote.UnaryTransport) Option {
 	return Option{F: func(o *client.Options, di *utils.Slice) {
 		di.Push(fmt.Sprintf("WithUnaryTransport(%T)", h))

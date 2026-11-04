@@ -40,7 +40,7 @@ func (h *transMetaHandler) Write(ctx context.Context, conn net.Conn, sendMsg rem
 	if prepared, _ := sendMsg.Tags()[remote.MetaPrepared].(bool); prepared {
 		return ctx, nil
 	}
-	remote.PreparePrimaryHeaders(ctx, sendMsg, sendMsg.RPCRole() == remote.Server)
+
 	var err error
 	for _, hdlr := range h.mhs {
 		ctx, err = hdlr.WriteMeta(ctx, sendMsg)

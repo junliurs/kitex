@@ -124,7 +124,6 @@ func (t ttHeader) encode(ctx context.Context, message remote.Message, out remote
 }
 
 func (t ttHeader) decode(ctx context.Context, message remote.Message, in remote.ByteBuffer) (err error) {
-	remote.PreparePrimaryHeaders(ctx, message, message.RPCRole() == remote.Client)
 	param, err := remote.AccessHeaders(message.TransInfo()).DecodeTTHeader(ctx, in)
 	if err != nil {
 		return perrors.NewProtocolError(err)

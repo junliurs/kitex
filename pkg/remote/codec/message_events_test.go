@@ -199,3 +199,35 @@ func TestPayloadCompletionPreservesDecoderError(t *testing.T) {
 		}
 	}
 }
+
+type skippedPayload struct{ remote.PayloadCodec }
+
+func (skippedPayload) Unmarshal(_ context.Context, _ remote.Message, in remote.ByteBuffer) error {
+	return in.Skip(3)
+}
+
+type countedReader struct{ remote.ByteBuffer }
+
+// Some readers preserve a legacy ReadLen contract while separately exposing
+// the full wire consumption, including Skip.
+func (*countedReader) ReadLen() int       { return 0 }
+func (r *countedReader) ConsumedLen() int { return r.ByteBuffer.ReadLen() }
+
+func TestPayloadAccountingDoesNotDependOnObserver(t *testing.T) {
+	for _, observed := range []bool{false, true} {
+		msg := initClientRecvMsg()
+		msg.SetPayloadCodec(skippedPayload{PayloadCodec: mpc})
+		msg.SetPayloadLen(0)
+		ctx := context.Background()
+		if observed {
+			ctx = context.WithValue(ctx, remote.TransportContextKey{}, &completionEvents{})
+		}
+		in := &countedReader{ByteBuffer: remote.NewReaderBuffer([]byte{1, 2, 3})}
+		err := (&defaultCodec{}).DecodePayload(ctx, msg, in)
+		if err != nil || msg.PayloadLen() != 3 || msg.RPCInfo().Stats().RecvSize() != 3 {
+			t.Fatalf("observer=%v payload=%d received=%d err=%v", observed, msg.PayloadLen(), msg.RPCInfo().Stats().RecvSize(), err)
+		}
+		in.Release(nil)
+		remote.RecycleMessage(msg)
+	}
+}

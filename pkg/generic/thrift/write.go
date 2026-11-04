@@ -664,10 +664,9 @@ func writeStruct(ctx context.Context, val interface{}, out *thrift.BufferWriter,
 
 	var err error
 	for name, field := range t.Struct.FieldsByName {
-		if handled, err := writePreparedPayloadMetadata(ctx, out, t, field); handled {
-			if err != nil {
-				return err
-			}
+		if handled, err := writeCodecField(ctx, out, t, field); err != nil {
+			return err
+		} else if handled {
 			continue
 		}
 		elem, ok := fg(val, field)
@@ -766,10 +765,9 @@ func writeHTTPRequest(ctx context.Context, val interface{}, out *thrift.BufferWr
 func writeJSON(ctx context.Context, val interface{}, out *thrift.BufferWriter, t *descriptor.TypeDescriptor, opt *writerOption) error {
 	data := val.(*gjson.Result)
 	for name, field := range t.Struct.FieldsByName {
-		if handled, err := writePreparedPayloadMetadata(ctx, out, t, field); handled {
-			if err != nil {
-				return err
-			}
+		if handled, err := writeCodecField(ctx, out, t, field); err != nil {
+			return err
+		} else if handled {
 			continue
 		}
 		elem := data.Get(name)

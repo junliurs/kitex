@@ -18,8 +18,8 @@ var ErrUnaryTransportProtocol = errors.New("custom unary transport does not supp
 // owns its arguments until it exits, including when the caller times out first.
 type UnaryTaskRunner func(context.Context, time.Duration, any, any, endpoint.Endpoint) (context.Context, error)
 
-// UnaryTransport replaces the unary endpoint and owns resolution and deadlines.
-// Middleware, retry and fallback continue to surround the endpoint.
+// UnaryTransport replaces the unary endpoint. Middleware, retry and fallback
+// continue to surround it; middleware configuration is independent.
 type UnaryTransport interface {
 	Validate(*serviceinfo.ServiceInfo, rpcinfo.RPCConfig) error
 	NewEndpoint(*ClientOption, []MetaHandler, ClientTransHandler, UnaryTaskRunner) (endpoint.Endpoint, error)

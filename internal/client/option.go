@@ -144,14 +144,25 @@ func (o *StreamOptions) BuildSendChain(sendEndpoint cep.StreamSendEndpoint) cep.
 	return cep.StreamSendChain(o.StreamSendMiddlewares...)(sendEndpoint)
 }
 
+// MiddlewareConfig independently controls framework-provided middleware.
+// Its zero value preserves the ordinary Kitex pipeline.
+type MiddlewareConfig struct {
+	DisableServiceDiscovery       bool
+	DisableInstanceCircuitBreaker bool
+	DisableInstanceMiddlewares    bool
+	DisableXDSRouter              bool
+	DisableRPCTimeout             bool
+}
+
 // Options is used to initialize a client.
 type Options struct {
-	UnaryTransport remote.UnaryTransport
-	Cli            *rpcinfo.EndpointBasicInfo
-	Svr            *rpcinfo.EndpointBasicInfo
-	Configs        rpcinfo.RPCConfig
-	Locks          *ConfigLocks
-	Once           *configutil.OptionOnce
+	UnaryTransport   remote.UnaryTransport
+	MiddlewareConfig MiddlewareConfig
+	Cli              *rpcinfo.EndpointBasicInfo
+	Svr              *rpcinfo.EndpointBasicInfo
+	Configs          rpcinfo.RPCConfig
+	Locks            *ConfigLocks
+	Once             *configutil.OptionOnce
 
 	UnaryOptions  UnaryOptions
 	StreamOptions StreamOptions

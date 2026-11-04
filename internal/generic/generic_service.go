@@ -39,11 +39,11 @@ const (
 
 // Args generic request
 type Args struct {
-	payloadMetadata *thrift.PayloadMetadata
-	Request         interface{}
-	Method          string
-	base            *base.Base
-	inner           interface{}
+	codecExtension thrift.MessageCodecExtension
+	Request        interface{}
+	Method         string
+	base           *base.Base
+	inner          interface{}
 }
 
 var (
@@ -68,7 +68,10 @@ func (g *Args) Write(ctx context.Context, method string, out bufiox.Writer) erro
 		return err
 	}
 	if w, ok := g.inner.(thrift.MessageWriter); ok {
-		return w.Write(thrift.WithPayloadMetadata(ctx, g.payloadMetadata), out, g.Request, method, true, g.base)
+		if g.codecExtension != nil {
+			ctx = g.codecExtension.CodecContext(ctx)
+		}
+		return w.Write(ctx, out, g.Request, method, true, g.base)
 	}
 	return fmt.Errorf("unexpected Args writer type: %T", g.inner)
 }
@@ -91,20 +94,16 @@ func (g *Args) Read(ctx context.Context, method string, dataLen int, in bufiox.R
 	if rw, ok := g.inner.(thrift.MessageReader); ok {
 		g.Method = method
 		var err error
-		if thrift.PayloadMetadataEnabled(ctx) {
-			field, _, lookupErr := lookupPayloadMetadata(g.inner, method, false)
-			if lookupErr != nil {
-				return lookupErr
-			}
-			g.payloadMetadata = &thrift.PayloadMetadata{Field: field, Received: true}
-			ctx = thrift.WithPayloadMetadata(ctx, g.payloadMetadata)
+		g.codecExtension, err = newCodecExtension(ctx, g.inner, method, false)
+		if err != nil {
+			return err
+		}
+		if g.codecExtension != nil {
+			ctx = g.codecExtension.CodecContext(ctx)
 		}
 		g.Request, err = rw.Read(ctx, method, false, dataLen, in)
-		if g.payloadMetadata != nil {
-			g.base = g.payloadMetadata.Request
-			if doc, ok := g.Request.(*thrift.PayloadJSON); ok {
-				g.Request = doc.Value
-			}
+		if err == nil && g.codecExtension != nil {
+			g.Request, err = g.codecExtension.Decoded(g.Request)
 		}
 		return err
 	}
@@ -131,9 +130,9 @@ func (g *Args) GetFirstArgument() interface{} {
 
 // Result generic response
 type Result struct {
-	payloadMetadata *thrift.PayloadMetadata
-	Success         interface{}
-	inner           interface{}
+	codecExtension thrift.MessageCodecExtension
+	Success        interface{}
+	inner          interface{}
 }
 
 var (
@@ -152,7 +151,10 @@ func (r *Result) Write(ctx context.Context, method string, out bufiox.Writer) er
 		return err
 	}
 	if w, ok := r.inner.(thrift.MessageWriter); ok {
-		return w.Write(thrift.WithPayloadMetadata(ctx, r.payloadMetadata), out, r.Success, method, false, nil)
+		if r.codecExtension != nil {
+			ctx = r.codecExtension.CodecContext(ctx)
+		}
+		return w.Write(ctx, out, r.Success, method, false, nil)
 	}
 	return fmt.Errorf("unexpected Result writer type: %T", r.inner)
 }
@@ -174,19 +176,16 @@ func (r *Result) Read(ctx context.Context, method string, dataLen int, in bufiox
 	}
 	if w, ok := r.inner.(thrift.MessageReader); ok {
 		var err error
-		if thrift.PayloadMetadataEnabled(ctx) {
-			field, _, lookupErr := lookupPayloadMetadata(r.inner, method, true)
-			if lookupErr != nil {
-				return lookupErr
-			}
-			r.payloadMetadata = &thrift.PayloadMetadata{Field: field, Received: true}
-			ctx = thrift.WithPayloadMetadata(ctx, r.payloadMetadata)
+		r.codecExtension, err = newCodecExtension(ctx, r.inner, method, true)
+		if err != nil {
+			return err
+		}
+		if r.codecExtension != nil {
+			ctx = r.codecExtension.CodecContext(ctx)
 		}
 		r.Success, err = w.Read(ctx, method, true, dataLen, in)
-		if r.payloadMetadata != nil {
-			if doc, ok := r.Success.(*thrift.PayloadJSON); ok {
-				r.Success = doc.Value
-			}
+		if err == nil && r.codecExtension != nil {
+			r.Success, err = r.codecExtension.Decoded(r.Success)
 		}
 		return err
 	}

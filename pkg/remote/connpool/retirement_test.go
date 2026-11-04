@@ -44,7 +44,7 @@ func (d *retirementDialer) DialTimeout(network, address string, _ time.Duration)
 
 func retirementPool(t *testing.T) (*LongPool, remote.ConnOption) {
 	t.Helper()
-	p := NewLongPool("meshlib.retirement", config.IdleConfig{MaxIdlePerAddress: 4, MaxIdleGlobal: 16, MaxIdleTimeout: time.Hour})
+	p := NewLongPool("test.retirement", config.IdleConfig{MaxIdlePerAddress: 4, MaxIdleGlobal: 16, MaxIdleTimeout: time.Hour})
 	t.Cleanup(func() { _ = p.Close() })
 	return p, remote.ConnOption{Dialer: new(retirementDialer), ConnectTimeout: time.Second}
 }
@@ -58,7 +58,7 @@ func retirementGet(t *testing.T, p *LongPool, opt remote.ConnOption) *longConn {
 	return c.(*longConn)
 }
 
-func TestMeshlibRetiredConnectionCannotEnterReplacementPeer(t *testing.T) {
+func TestRetiredConnectionCannotEnterReplacementPeer(t *testing.T) {
 	p, opt := retirementPool(t)
 	old := retirementGet(t, p, opt)
 	p.Clean("tcp", old.address)
@@ -79,7 +79,7 @@ func TestMeshlibRetiredConnectionCannotEnterReplacementPeer(t *testing.T) {
 	_ = p.Discard(reused)
 }
 
-func TestMeshlibLoadedPeerRejectsReturnAfterRetirement(t *testing.T) {
+func TestLoadedPeerRejectsReturnAfterRetirement(t *testing.T) {
 	p, opt := retirementPool(t)
 	c := retirementGet(t, p, opt)
 	loaded, _ := p.peerMap.Load(netAddr{"tcp", c.address})
@@ -100,7 +100,7 @@ func TestMeshlibLoadedPeerRejectsReturnAfterRetirement(t *testing.T) {
 	}
 }
 
-func TestMeshlibConcurrentRetirementDrainsConnections(t *testing.T) {
+func TestConcurrentRetirementDrainsConnections(t *testing.T) {
 	p, opt := retirementPool(t)
 	var workers sync.WaitGroup
 	for worker := 0; worker < 8; worker++ {
@@ -141,7 +141,7 @@ func TestMeshlibConcurrentRetirementDrainsConnections(t *testing.T) {
 	}
 }
 
-func TestMeshlibPoolResetKeepsBorrowedIOAndRejectsOldReturns(t *testing.T) {
+func TestPoolResetKeepsBorrowedIOAndRejectsOldReturns(t *testing.T) {
 	p, opt := retirementPool(t)
 	held := retirementGet(t, p, opt)
 	idle := retirementGet(t, p, opt)
@@ -171,7 +171,7 @@ func TestMeshlibPoolResetKeepsBorrowedIOAndRejectsOldReturns(t *testing.T) {
 	}
 }
 
-func TestMeshlibConnectionPolicyBoundsAndExpiredActiveSocket(t *testing.T) {
+func TestConnectionPolicyBoundsAndExpiredActiveSocket(t *testing.T) {
 	p, opt := retirementPool(t)
 	policy := remote.ConnectionPolicy{Enabled: true, IdleTimeout: 10 * time.Millisecond, MaxIdleConnections: 1}
 	get := func() *longConn {
@@ -201,7 +201,7 @@ func TestMeshlibConnectionPolicyBoundsAndExpiredActiveSocket(t *testing.T) {
 	}
 }
 
-func TestMeshlibMixedPolicyDeadlinesAndBorrowedSnapshots(t *testing.T) {
+func TestMixedPolicyDeadlinesAndBorrowedSnapshots(t *testing.T) {
 	p, opt := retirementPool(t)
 	long := remote.ConnectionPolicy{Enabled: true, IdleTimeout: time.Hour, MaxIdleConnections: 4}
 	short := remote.ConnectionPolicy{Enabled: true, IdleTimeout: 10 * time.Millisecond, MaxIdleConnections: 4}

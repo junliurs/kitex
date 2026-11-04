@@ -321,12 +321,18 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 	mw.mws = append(mw.mws, contextMW)
 	mw.mws = append(mw.mws, builderMWs...)
 	mw.mws = append(mw.mws, acl.NewACLMiddleware(kc.opt.ACLRules))
-	if kc.opt.UnaryTransport == nil && kc.opt.Proxy == nil {
-		mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
-		mw.mws = append(mw.mws, kc.opt.CBSuite.InstanceCBMW())
-		mw.mws = append(mw.mws, richMWsWithBuilder(ctx, kc.opt.IMWBs)...)
-	} else if kc.opt.UnaryTransport == nil {
-		if kc.opt.Resolver != nil { // customized service discovery
+	if kc.opt.Proxy == nil {
+		if !kc.opt.MiddlewareConfig.DisableServiceDiscovery {
+			mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
+		}
+		if !kc.opt.MiddlewareConfig.DisableInstanceCircuitBreaker {
+			mw.mws = append(mw.mws, kc.opt.CBSuite.InstanceCBMW())
+		}
+		if !kc.opt.MiddlewareConfig.DisableInstanceMiddlewares {
+			mw.mws = append(mw.mws, richMWsWithBuilder(ctx, kc.opt.IMWBs)...)
+		}
+	} else {
+		if kc.opt.Resolver != nil && !kc.opt.MiddlewareConfig.DisableServiceDiscovery { // customized service discovery
 			mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
 		}
 		mw.mws = append(mw.mws, newProxyMW(kc.opt.Proxy))
@@ -335,11 +341,11 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 
 	// 2. unary middlewares
 	mw.uMws = append(mw.uMws, kc.opt.CBSuite.ServiceCBMW().ToUnaryMiddleware())
-	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil && kc.opt.UnaryTransport == nil {
+	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil && !kc.opt.MiddlewareConfig.DisableXDSRouter {
 		// integrate xds if enabled
 		mw.uMws = append(mw.uMws, kc.opt.XDSRouterMiddleware.ToUnaryMiddleware())
 	}
-	if kc.opt.UnaryTransport == nil {
+	if !kc.opt.MiddlewareConfig.DisableRPCTimeout {
 		mw.uMws = append(mw.uMws, rpcTimeoutMW(ctx))
 	}
 	kc.opt.UnaryOptions.InitMiddlewares(ctx)
@@ -348,7 +354,7 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 	// 3. stream middlewares
 	kc.opt.Streaming.InitMiddlewares(ctx)
 	mw.smws = mw.mws
-	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil {
+	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil && !kc.opt.MiddlewareConfig.DisableXDSRouter {
 		// integrate xds if enabled
 		mw.smws = append([]endpoint.Middleware{kc.opt.XDSRouterMiddleware}, mw.smws...)
 	}

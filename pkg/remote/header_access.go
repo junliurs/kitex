@@ -2,47 +2,15 @@ package remote
 
 import (
 	"context"
-	"unsafe"
 
 	"github.com/cloudwego/gopkg/bufiox"
 	"github.com/cloudwego/gopkg/protocol/ttheader"
 )
 
-type HeaderEntry = struct {
-	Kind, ID   uint16
-	Op         uint32
-	Key, Value string
-}
-
-type HeaderView struct {
-	entries       []HeaderEntry
-	metadataIndex [21]uint32
-	byteSize      int
-	valid         bool
-}
-
-func (s *HeaderView) Valid() bool { return s != nil && s.valid }
-func (s *HeaderView) Len() int {
-	if s == nil {
-		return 0
-	}
-	return len(s.entries)
-}
-
-func HeaderViewLayout() [6]uintptr {
-	return [6]uintptr{unsafe.Sizeof(HeaderView{}), unsafe.Alignof(HeaderView{}), unsafe.Offsetof(HeaderView{}.entries), unsafe.Offsetof(HeaderView{}.metadataIndex), unsafe.Offsetof(HeaderView{}.byteSize), unsafe.Offsetof(HeaderView{}.valid)}
-}
-
-// HeaderAccess reads and writes the message's original maps. Exported view
-// methods remain compatibility queries and never create another field store.
+// HeaderAccess reads and writes a message's original transport maps.
 type HeaderAccess struct{ info TransInfo }
 
-func AccessHeaders(info TransInfo) HeaderAccess     { return HeaderAccess{info: info} }
-func (a HeaderAccess) EnablePrimary(bool) bool      { return false }
-func (a HeaderAccess) Primary() bool                { return false }
-func (a HeaderAccess) View() *HeaderView            { return nil }
-func (a HeaderAccess) ResetNativeChanges(bool) bool { return false }
-func (a HeaderAccess) NativeChanges() *HeaderView   { return nil }
+func AccessHeaders(info TransInfo) HeaderAccess { return HeaderAccess{info: info} }
 
 func (ti *transInfo) materialize() {
 	if ti.intInfo == nil {

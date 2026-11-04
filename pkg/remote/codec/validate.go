@@ -79,10 +79,8 @@ func payloadChecksumGenerate(ctx context.Context, pv PayloadValidator, outboundP
 			return err
 		}
 		key := getValidatorKey(ctx, pv)
-		headers := remote.AccessHeaders(message.TransInfo())
-		if headers.Primary() {
-			headers.SetString(key, value)
-		} else if strInfo := message.TransInfo().TransStrInfo(); strInfo != nil {
+		strInfo := message.TransInfo().TransStrInfo()
+		if strInfo != nil {
 			strInfo[key] = value
 		}
 	}
@@ -100,17 +98,11 @@ func payloadChecksumValidate(ctx context.Context, pv PayloadValidator, in remote
 
 	// get key and value
 	key := getValidatorKey(ctx, pv)
-	headers := remote.AccessHeaders(message.TransInfo())
-	var expectedValue string
-	if headers.Primary() {
-		expectedValue = headers.String(key)
-	} else {
-		strInfo := message.TransInfo().TransStrInfo()
-		if strInfo == nil {
-			return nil
-		}
-		expectedValue = strInfo[key]
+	strInfo := message.TransInfo().TransStrInfo()
+	if strInfo == nil {
+		return nil
 	}
+	expectedValue := strInfo[key]
 	payloadLen := message.PayloadLen() // total length
 	payload, err := in.Peek(payloadLen)
 	if err != nil {
@@ -143,27 +135,30 @@ func fillRPCInfoBeforeValidate(ctx context.Context, message remote.Message) cont
 	if transInfo == nil {
 		return ctx
 	}
-	headers := remote.AccessHeaders(transInfo)
+	intInfo := transInfo.TransIntInfo()
+	if intInfo == nil {
+		return ctx
+	}
 	from := rpcinfo.AsMutableEndpointInfo(ri.From())
 	if from != nil {
-		if v := headers.Int(transmeta.FromService); v != "" {
+		if v := intInfo[transmeta.FromService]; v != "" {
 			from.SetServiceName(v)
 		}
-		if v := headers.Int(transmeta.FromMethod); v != "" {
+		if v := intInfo[transmeta.FromMethod]; v != "" {
 			from.SetMethod(v)
 		}
 	}
 	to := rpcinfo.AsMutableEndpointInfo(ri.To())
 	if to != nil {
 		// server-side reads "to_method" from ttheader since "method" is set in thrift payload, which has not been unmarshalled
-		if v := headers.Int(transmeta.ToMethod); v != "" {
+		if v := intInfo[transmeta.ToMethod]; v != "" {
 			to.SetMethod(v)
 		}
-		if v := headers.Int(transmeta.ToService); v != "" {
+		if v := intInfo[transmeta.ToService]; v != "" {
 			to.SetServiceName(v)
 		}
 	}
-	if logid := headers.Int(transmeta.LogID); logid != "" {
+	if logid := intInfo[transmeta.LogID]; logid != "" {
 		ctx = context.WithValue(ctx, consts.CtxKeyLogID, logid)
 	}
 	return ctx

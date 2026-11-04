@@ -128,9 +128,7 @@ func (c *defaultCodec) EncodePayload(ctx context.Context, message remote.Message
 	if err = c.encodePayload(ctx, message, out); err != nil {
 		return err
 	}
-	if remote.MessageEventHandlerFromContext(ctx) != nil {
-		message.SetPayloadLen(out.WrittenLen() - headerLen)
-	}
+	message.SetPayloadLen(out.WrittenLen() - headerLen)
 
 	// 3. fill framed field if needed
 	var payloadLen int
@@ -273,15 +271,12 @@ func (c *defaultCodec) DecodePayload(ctx context.Context, message remote.Message
 	defer func() {
 		if ri := message.RPCInfo(); ri != nil {
 			if ms := rpcinfo.AsMutableRPCStats(ri.Stats()); ms != nil {
-				ms.SetRecvSize(uint64(messageConsumedLen(ctx, in)))
+				ms.SetRecvSize(uint64(remote.ConsumedLen(in)))
 			}
 		}
 	}()
 
-	readLen := in.ReadLen
-	if remote.MessageEventHandlerFromContext(ctx) != nil {
-		readLen = func() int { return remote.ConsumedLen(in) }
-	}
+	readLen := func() int { return remote.ConsumedLen(in) }
 	hasRead := readLen()
 	pCodec, err := remote.GetPayloadCodec(message)
 	if err != nil {
@@ -494,11 +489,4 @@ func getWrittenBytes(lb *netpoll.LinkBuffer) (buf []byte, err error) {
 		return nil, err
 	}
 	return lb.Bytes(), nil
-}
-
-func messageConsumedLen(ctx context.Context, in remote.ByteBuffer) int {
-	if remote.MessageEventHandlerFromContext(ctx) != nil {
-		return remote.ConsumedLen(in)
-	}
-	return in.ReadLen()
 }

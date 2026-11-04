@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestMeshlibTimeoutCallbacksNoWatcherGoroutines(t *testing.T) {
+func TestTimeoutCallbacksNoWatcherGoroutines(t *testing.T) {
 	p := newTimeoutContext(context.Background(), 0)
 	before := runtime.NumGoroutine()
 	stops := make([]func() bool, 1000)
@@ -36,7 +36,7 @@ func TestMeshlibTimeoutCallbacksNoWatcherGoroutines(t *testing.T) {
 	}
 }
 
-func TestMeshlibTimeoutCallbackStopCancelRace(t *testing.T) {
+func TestTimeoutCallbackStopCancelRace(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		p := newTimeoutContext(context.Background(), 0)
 		var calls atomic.Int32
@@ -64,7 +64,7 @@ func TestMeshlibTimeoutCallbackStopCancelRace(t *testing.T) {
 	}
 }
 
-func TestMeshlibTimeoutCallbackAfterCancel(t *testing.T) {
+func TestTimeoutCallbackAfterCancel(t *testing.T) {
 	p := newTimeoutContext(context.Background(), 0)
 	p.Cancel(nil)
 	if p.Err() != nil {

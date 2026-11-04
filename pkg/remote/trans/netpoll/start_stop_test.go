@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/kitex/pkg/remote"
 )
 
-func TestMeshlibShutdownBeforeBootstrap(t *testing.T) {
+func TestShutdownBeforeBootstrap(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

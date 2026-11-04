@@ -15,9 +15,7 @@ func TestMapPublicAliasesAndWire(t *testing.T) {
 	ti := newTransInfo().(*transInfo)
 	h := AccessHeaders(ti)
 	ints, strs := ti.TransIntInfo(), ti.TransStrInfo()
-	if h.EnablePrimary(false) || h.Primary() || h.View() != nil || h.ResetNativeChanges(true) {
-		t.Fatal("map owner exposed a second storage or trusted change tracking")
-	}
+
 	ints[9], ints[65535] = "Echo", "unknown\x00integer"
 	strs["keep"], strs["delete"], strs["empty"] = "before", "value", ""
 	h.SetString("keep", "through-framework")

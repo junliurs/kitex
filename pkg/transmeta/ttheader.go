@@ -59,13 +59,11 @@ func (ch *clientTTHeaderHandler) WriteMeta(ctx context.Context, msg remote.Messa
 	transInfo := msg.TransInfo()
 
 	headers := remote.AccessHeaders(transInfo)
-	if headers.Primary() {
-		writeClientIntHeaders(msg, headers.SetInt)
-	} else {
-		hd := make(map[uint16]string, 5)
-		writeClientIntHeaders(msg, func(k uint16, v string) { hd[k] = v })
-		transInfo.PutTransIntInfo(hd)
-	}
+
+	hd := make(map[uint16]string, 5)
+	writeClientIntHeaders(msg, func(k uint16, v string) { hd[k] = v })
+	transInfo.PutTransIntInfo(hd)
+
 	if idlSvcName := getIDLSvcName(ri); idlSvcName != "" {
 		headers.SetString(transmeta.HeaderIDLServiceName, idlSvcName)
 	}

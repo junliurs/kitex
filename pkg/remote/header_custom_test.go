@@ -9,15 +9,15 @@ import (
 	"github.com/cloudwego/gopkg/protocol/ttheader"
 )
 
-type primaryCustomInfo struct {
+type customHeaderInfo struct {
 	ints             map[uint16]string
 	strs             map[string]string
 	intPuts, strPuts int
 }
 
-func (c *primaryCustomInfo) TransIntInfo() map[uint16]string { return c.ints }
-func (c *primaryCustomInfo) TransStrInfo() map[string]string { return c.strs }
-func (c *primaryCustomInfo) PutTransIntInfo(values map[uint16]string) {
+func (c *customHeaderInfo) TransIntInfo() map[uint16]string { return c.ints }
+func (c *customHeaderInfo) TransStrInfo() map[string]string { return c.strs }
+func (c *customHeaderInfo) PutTransIntInfo(values map[uint16]string) {
 	if values == nil {
 		return
 	}
@@ -31,7 +31,7 @@ func (c *primaryCustomInfo) PutTransIntInfo(values map[uint16]string) {
 	}
 }
 
-func (c *primaryCustomInfo) PutTransStrInfo(values map[string]string) {
+func (c *customHeaderInfo) PutTransStrInfo(values map[string]string) {
 	if values == nil {
 		return
 	}
@@ -44,13 +44,11 @@ func (c *primaryCustomInfo) PutTransStrInfo(values map[string]string) {
 		c.strs[key] = value
 	}
 }
-func (c *primaryCustomInfo) Recycle() { c.ints, c.strs = nil, nil }
+func (c *customHeaderInfo) Recycle() { c.ints, c.strs = nil, nil }
 
-func TestPrimaryHeaderCustomAndNil(t *testing.T) {
+func TestHeaderCustomAndNil(t *testing.T) {
 	empty := AccessHeaders(nil)
-	if empty.EnablePrimary(false) || empty.Primary() || empty.View().Valid() {
-		t.Fatal("nil enabled")
-	}
+
 	empty.SetInt(9, "unused")
 	empty.SetString("unused", "value")
 	empty.DeleteInt(9)
@@ -63,12 +61,10 @@ func TestPrimaryHeaderCustomAndNil(t *testing.T) {
 	}
 	empty.RangeInt(func(uint16, string) bool { t.Fatal("nil range"); return true })
 	empty.RangeString(func(string, string) bool { t.Fatal("nil range"); return true })
-	custom := &primaryCustomInfo{}
+	custom := &customHeaderInfo{}
 	h := AccessHeaders(custom)
-	if h.EnablePrimary(false) {
-		t.Fatal("custom enabled")
-	}
-	wire := primaryTestWire(t, map[uint16]string{65535: "unknown"}, map[string]string{"": "empty"})
+
+	wire := headerTestWire(t, map[uint16]string{65535: "unknown"}, map[string]string{"": "empty"})
 	if _, err := h.DecodeTTHeader(context.Background(), bufiox.NewBytesReader(wire)); err != nil {
 		t.Fatal(err)
 	}
@@ -79,15 +75,15 @@ func TestPrimaryHeaderCustomAndNil(t *testing.T) {
 	h.SetString("new", "value")
 	h.DeleteInt(65535)
 	h.DeleteString("")
-	ints, strs := collectPrimaryHeaders(h)
+	ints, strs := collectHeaders(h)
 	if len(ints) != 1 || ints[9] != "Echo" || len(strs) != 1 || strs["new"] != "value" {
 		t.Fatal("custom safe access")
 	}
 }
 
-func TestPrimaryHeaderCustomSetPreservesDirectMapContract(t *testing.T) {
+func TestHeaderCustomSetPreservesDirectMapContract(t *testing.T) {
 	for _, allocated := range []bool{false, true} {
-		custom := &primaryCustomInfo{}
+		custom := &customHeaderInfo{}
 		if allocated {
 			custom.ints, custom.strs = map[uint16]string{}, map[string]string{}
 		}
@@ -113,14 +109,14 @@ func TestPrimaryHeaderCustomSetPreservesDirectMapContract(t *testing.T) {
 	}
 }
 
-func collectPrimaryHeaders(h HeaderAccess) (map[uint16]string, map[string]string) {
+func collectHeaders(h HeaderAccess) (map[uint16]string, map[string]string) {
 	ints, strs := make(map[uint16]string), make(map[string]string)
 	h.RangeInt(func(key uint16, value string) bool { ints[key] = value; return true })
 	h.RangeString(func(key, value string) bool { strs[key] = value; return true })
 	return ints, strs
 }
 
-func primaryTestWire(t *testing.T, ints map[uint16]string, strs map[string]string) []byte {
+func headerTestWire(t *testing.T, ints map[uint16]string, strs map[string]string) []byte {
 	t.Helper()
 	var wire []byte
 	out := bufiox.NewBytesWriter(&wire)

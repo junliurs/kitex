@@ -46,10 +46,10 @@ func TestTTHeaderDecodeRetainsPooledMaps(t *testing.T) {
 			t.Fatalf("round %d: decode replaced the pooled maps", round)
 		}
 		for i := 0; i < 64; i++ {
-			ints[uint16(1000+i)] = "mesh-value"
-			strs["mesh-"+strconv.Itoa(i)] = "mesh-value"
+			ints[uint16(1000+i)] = "custom-value"
+			strs["custom-"+strconv.Itoa(i)] = "custom-value"
 		}
-		if msg.TransInfo().TransIntInfo()[1000] != "mesh-value" || msg.TransInfo().TransStrInfo()["mesh-0"] != "mesh-value" {
+		if msg.TransInfo().TransIntInfo()[1000] != "custom-value" || msg.TransInfo().TransStrInfo()["custom-0"] != "custom-value" {
 			t.Fatal("decoded maps no longer share pooled storage")
 		}
 		for key := range ints {
