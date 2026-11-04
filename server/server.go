@@ -212,7 +212,7 @@ func (s *server) Run() (err error) {
 	if s.opt.Proxy != nil {
 		svrCfg.Address, err = s.opt.Proxy.Replace(addr)
 		if err != nil {
-			return err
+			return
 		}
 	}
 
@@ -264,7 +264,7 @@ func (s *server) Run() (err error) {
 		err = e
 		klog.Errorf("KITEX: stop server error: error=%s", e.Error())
 	}
-	return err
+	return
 }
 
 // Stop stops the server gracefully.
@@ -290,7 +290,7 @@ func (s *server) Stop() (err error) {
 			s.svr = nil
 		}
 	})
-	return err
+	return
 }
 
 // buildCoreMiddleware build the core middleware that include some default framework logic like error handler and ACL.
@@ -367,10 +367,8 @@ func (s *server) invokeHandleEndpoint() endpoint.UnaryEndpoint {
 				err = kerrors.ErrPanic.WithCauseAndStack(
 					fmt.Errorf(
 						"[happened in biz handler, method=%s.%s, please check the panic at the server side] %s",
-						svcInfo.ServiceName, methodName, handlerErr,
-					),
-					string(debug.Stack()),
-				)
+						svcInfo.ServiceName, methodName, handlerErr),
+					string(debug.Stack()))
 				rpcStats := rpcinfo.AsMutableRPCStats(ri.Stats())
 				rpcStats.SetPanicked(err)
 			}
@@ -412,10 +410,8 @@ func (s *server) streamHandleEndpoint() sep.StreamEndpoint {
 				err = kerrors.ErrPanic.WithCauseAndStack(
 					fmt.Errorf(
 						"[happened in biz handler, method=%s.%s, please check the panic at the server side] %s",
-						svcInfo.ServiceName, methodName, handlerErr,
-					),
-					string(debug.Stack()),
-				)
+						svcInfo.ServiceName, methodName, handlerErr),
+					string(debug.Stack()))
 				rpcStats := rpcinfo.AsMutableRPCStats(ri.Stats())
 				rpcStats.SetPanicked(err)
 			}
@@ -507,7 +503,7 @@ func (s *server) buildLimiterWithOpt() (handler remote.InboundHandler) {
 	connLimit := s.opt.Limit.ConLimit
 	qpsLimit := s.opt.Limit.QPSLimit
 	if limits == nil && connLimit == nil && qpsLimit == nil {
-		return handler
+		return
 	}
 
 	if connLimit == nil {
@@ -536,7 +532,7 @@ func (s *server) buildLimiterWithOpt() (handler remote.InboundHandler) {
 
 	handler = bound.NewServerLimiterHandler(connLimit, qpsLimit, s.opt.Limit.LimitReporter, s.opt.Limit.QPSLimitPostDecode)
 	// TODO: gRPC limiter
-	return handler
+	return
 }
 
 func (s *server) check() error {

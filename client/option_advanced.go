@@ -40,27 +40,6 @@ import (
 	"github.com/cloudwego/kitex/pkg/utils"
 )
 
-// MiddlewareConfig independently controls the client's framework middleware.
-type MiddlewareConfig = client.MiddlewareConfig
-
-// WithMiddlewareConfig explicitly configures the framework middleware chain.
-func WithMiddlewareConfig(config MiddlewareConfig) Option {
-	return Option{F: func(o *client.Options, di *utils.Slice) {
-		di.Push(fmt.Sprintf("WithMiddlewareConfig(%+v)", config))
-		o.MiddlewareConfig = config
-	}}
-}
-
-// WithUnaryTransport replaces the unary endpoint. Middleware configuration is
-// independent and can be selected with WithMiddlewareConfig. It cannot be
-// combined with a proxy or connection warmup.
-func WithUnaryTransport(h remote.UnaryTransport) Option {
-	return Option{F: func(o *client.Options, di *utils.Slice) {
-		di.Push(fmt.Sprintf("WithUnaryTransport(%T)", h))
-		o.UnaryTransport = h
-	}}
-}
-
 // WithHTTPConnection specifies client use RPC over http.
 func WithHTTPConnection() Option {
 	return Option{F: func(o *client.Options, di *utils.Slice) {

@@ -2,7 +2,6 @@ package transmeta
 
 import (
 	"context"
-	"reflect"
 	"testing"
 	"time"
 
@@ -107,15 +106,7 @@ func TestHeaderResponseTTHeaderMetadata(t *testing.T) {
 	if h.String(bizStatus) != "17" || h.String(bizMessage) != "denied" || h.String(bizExtra) != `{"reason":"policy"}` {
 		t.Fatal("business status was lost")
 	}
-	for _, extra := range []string{`{"key":"value"}`, "{invalid", ""} {
-		input := map[string]string{bizStatus: "17", bizMessage: "failure", bizExtra: extra}
-		h.MergeString(input)
-		want, wantErr := ParseBizStatusErr(input)
-		got, gotErr := parseBizStatusErr(h.String)
-		if (wantErr == nil) != (gotErr == nil) || !reflect.DeepEqual(got, want) {
-			t.Fatalf("public map helper differs for extra=%q: %v/%v %v/%v", extra, got, gotErr, want, wantErr)
-		}
-	}
+
 }
 
 func TestHeaderMetainfoBackwardAllFields(t *testing.T) {

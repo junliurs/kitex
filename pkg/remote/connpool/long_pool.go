@@ -150,7 +150,7 @@ func (p *pool) getPolicy(policy remote.ConnectionPolicy) (*longConn, bool, int) 
 		o := p.idleList[selected]
 		// reset slice element to nil, active conn object only could be hold reference by user function
 		p.idleList[selected] = nil
-		if o.policy == policy && o.IsActive() && !o.Expired() {
+		if o.policy == policy && o.IsActive() && (!policy.Enabled || !o.Expired()) {
 			p.idleList = p.idleList[:selected]
 			p.mu.Unlock()
 			return o, true, n - selected
@@ -180,7 +180,7 @@ func (p *pool) Put(o *longConn) bool {
 			timeout = o.policy.IdleTimeout
 		}
 	}
-	if !p.closed && len(p.idleList) < limit && timeout > 0 {
+	if !p.closed && len(p.idleList) < limit && (!o.policy.Enabled || timeout > 0) {
 		o.deadline = time.Now().Add(timeout)
 		p.idleList = append(p.idleList, o)
 		recycled = true

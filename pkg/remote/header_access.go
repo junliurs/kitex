@@ -12,15 +12,6 @@ type HeaderAccess struct{ info TransInfo }
 
 func AccessHeaders(info TransInfo) HeaderAccess { return HeaderAccess{info: info} }
 
-func (ti *transInfo) materialize() {
-	if ti.intInfo == nil {
-		ti.intInfo = make(map[uint16]string)
-	}
-	if ti.strInfo == nil {
-		ti.strInfo = make(map[string]string)
-	}
-}
-
 func (ti *transInfo) SetInt(id uint16, value string) {
 	if ti.intInfo == nil {
 		ti.intInfo = make(map[uint16]string)
@@ -175,33 +166,13 @@ func (a HeaderAccess) EncodeTTHeader(ctx context.Context, p ttheader.EncodeParam
 }
 
 func (a HeaderAccess) DecodeTTHeader(ctx context.Context, in bufiox.Reader) (ttheader.DecodeParam, error) {
-	var p ttheader.DecodeParam
-	var err error
-	intInfo, strInfo := a.LegacyMaps()
-	reuse := len(intInfo) == 0 && len(strInfo) == 0
-	if reuse {
-		p, err = ttheader.DecodeInto(ctx, in, intInfo, strInfo)
-	} else {
-		p, err = ttheader.Decode(ctx, in)
-	}
+	p, err := ttheader.Decode(ctx, in)
 	if err != nil {
-		if reuse {
-			for key := range intInfo {
-				delete(intInfo, key)
-			}
-			for key := range strInfo {
-				delete(strInfo, key)
-			}
-		}
 		return p, err
 	}
 	if a.info != nil {
-		if !reuse || intInfo == nil {
-			a.info.PutTransIntInfo(p.IntInfo)
-		}
-		if !reuse || strInfo == nil {
-			a.info.PutTransStrInfo(p.StrInfo)
-		}
+		a.info.PutTransIntInfo(p.IntInfo)
+		a.info.PutTransStrInfo(p.StrInfo)
 	}
 	return p, nil
 }

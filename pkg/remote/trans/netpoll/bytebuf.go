@@ -90,7 +90,7 @@ func (b *netpollByteBuffer) Next(n int) (p []byte, err error) {
 	if p, err = b.reader.Next(n); err == nil {
 		b.readSize += n
 	}
-	return p, err
+	return
 }
 
 // Peek returns the next n bytes without advancing the reader.
@@ -150,7 +150,7 @@ func (b *netpollByteBuffer) ReadString(n int) (s string, err error) {
 	if s, err = b.reader.ReadString(n); err == nil {
 		b.readSize += n
 	}
-	return s, err
+	return
 }
 
 // ReadBinary like ReadString.
@@ -166,7 +166,7 @@ func (b *netpollByteBuffer) ReadBinary(p []byte) (n int, err error) {
 	}
 	copy(p, buf)
 	b.readSize += n
-	return n, err
+	return
 }
 
 // Malloc n bytes sequentially in the writer buffer.
@@ -250,7 +250,7 @@ func (b *netpollByteBuffer) AppendBuffer(buf remote.ByteBuffer) (err error) {
 	subBuf := buf.(*netpollByteBuffer)
 	err = b.writer.Append(subBuf.writer)
 	buf.Release(nil)
-	return err
+	return
 }
 
 // Bytes are not supported in netpoll bytebuf.
@@ -270,7 +270,7 @@ func (b *netpollByteBuffer) Release(e error) (err error) {
 	}
 	b.zero()
 	bytebufPool.Put(b)
-	return err
+	return
 }
 
 func (b *netpollByteBuffer) zero() {

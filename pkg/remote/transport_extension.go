@@ -2,34 +2,9 @@ package remote
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync/atomic"
-	"time"
-
-	"github.com/cloudwego/kitex/pkg/endpoint"
-	"github.com/cloudwego/kitex/pkg/rpcinfo"
-	"github.com/cloudwego/kitex/pkg/serviceinfo"
 )
-
-var ErrUnaryTransportProtocol = errors.New("custom unary transport does not support streaming")
-
-// UnaryTaskRunner runs a transport task with Kitex's timeout worker. The task
-// owns its arguments until it exits, including when the caller times out first.
-type UnaryTaskRunner func(context.Context, time.Duration, any, any, endpoint.Endpoint) (context.Context, error)
-
-// UnaryTransport replaces the unary endpoint. Middleware, retry and fallback
-// continue to surround it; middleware configuration is independent.
-type UnaryTransport interface {
-	Validate(*serviceinfo.ServiceInfo, rpcinfo.RPCConfig) error
-	NewEndpoint(*ClientOption, []MetaHandler, ClientTransHandler, UnaryTaskRunner) (endpoint.Endpoint, error)
-}
-
-// ClientPoolLifecycle binds an extension to the actual configured pool. Its
-// cleanup runs before the pool closes, including failed client initialization.
-type ClientPoolLifecycle interface {
-	ClientPool(ConnPool) (func(), error)
-}
 
 // DisconnectHandler receives peer disconnection while a request may still run.
 // OnInactive remains the final connection cleanup callback.

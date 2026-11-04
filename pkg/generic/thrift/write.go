@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/cloudwego/dynamicgo/conv"
+
 	"github.com/cloudwego/gopkg/protocol/thrift"
 	"github.com/cloudwego/gopkg/protocol/thrift/base"
 	"github.com/tidwall/gjson"
@@ -33,6 +35,7 @@ import (
 )
 
 type writerOption struct {
+	jsonConv    *conv.Options
 	requestBase *base.Base // request base from metahandler
 	// decoding Base64 to binary
 	binaryWithBase64 bool
@@ -128,37 +131,43 @@ func typeOf(sample interface{}, t *descriptor.TypeDescriptor, opt *writerOption)
 }
 
 func typeJSONOf(data *gjson.Result, t *descriptor.TypeDescriptor, opt *writerOption) (v interface{}, w writer, err error) {
+	if opt == nil {
+		opt = &writerOption{}
+	}
 	tt := t.Type
 	defer func() {
 		if r := recover(); r != nil {
 			err = perrors.NewProtocolErrorWithType(perrors.InvalidData, fmt.Sprintf("json convert error:%#+v", r))
 		}
 	}()
+	if err = checkJSONScalar(data, t, opt.jsonConv); err != nil {
+		return nil, nil, err
+	}
 	switch tt {
 	case descriptor.BOOL:
 		v = data.Bool()
 		w = writeBool
-		return v, w, err
+		return
 	case descriptor.I08:
 		v = int8(data.Int())
 		w = writeInt8
-		return v, w, err
+		return
 	case descriptor.I16:
 		v = int16(data.Int())
 		w = writeInt16
-		return v, w, err
+		return
 	case descriptor.I32:
 		v = int32(data.Int())
 		w = writeInt32
-		return v, w, err
+		return
 	case descriptor.I64:
 		v = data.Int()
 		w = writeInt64
-		return v, w, err
+		return
 	case descriptor.DOUBLE:
 		v = data.Float()
 		w = writeJSONFloat64
-		return v, w, err
+		return
 	case descriptor.STRING:
 		v = data.String()
 		if t.Name == "binary" && opt.binaryWithBase64 {
@@ -166,25 +175,25 @@ func typeJSONOf(data *gjson.Result, t *descriptor.TypeDescriptor, opt *writerOpt
 		} else {
 			w = writeString
 		}
-		return v, w, err
+		return
 	// case descriptor.BINARY:
 	//	return writeBinary, nil
 	case descriptor.SET, descriptor.LIST:
 		v = data.Array()
 		w = writeJSONList
-		return v, w, err
+		return
 	case descriptor.MAP:
 		v = data.Map()
 		w = writeStringJSONMap
-		return v, w, err
+		return
 	case descriptor.STRUCT:
 		v = data
 		w = writeJSON
-		return v, w, err
+		return
 	case descriptor.VOID: // nil and Void
 		v = data
 		w = writeVoid
-		return v, w, err
+		return
 	}
 	return 0, nil, fmt.Errorf("data:%#v, expected type:%s, err:%#v", data, tt, err)
 }
@@ -763,11 +772,32 @@ func writeHTTPRequest(ctx context.Context, val interface{}, out *thrift.BufferWr
 }
 
 func writeJSON(ctx context.Context, val interface{}, out *thrift.BufferWriter, t *descriptor.TypeDescriptor, opt *writerOption) error {
+	if opt == nil {
+		opt = &writerOption{}
+	}
 	data := val.(*gjson.Result)
+	if opt.jsonConv != nil && opt.jsonConv.DisallowUnknownField {
+		var unknown error
+		data.ForEach(func(k, v gjson.Result) bool {
+			if _, ok := t.Struct.FieldsByName[k.String()]; !ok {
+				unknown = fmt.Errorf("unknown field %q", k.String())
+				return false
+			}
+			return true
+		})
+		if unknown != nil {
+			return unknown
+		}
+	}
 	for name, field := range t.Struct.FieldsByName {
 		if handled, err := writeCodecField(ctx, out, t, field); err != nil {
 			return err
 		} else if handled {
+			if opt.jsonConv != nil && opt.jsonConv.DisallowUnknownField {
+				if err := checkReplacedJSONFields(data.Get(name), field.Type); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		elem := data.Get(name)
@@ -780,16 +810,36 @@ func writeJSON(ctx context.Context, val interface{}, out *thrift.BufferWriter, t
 		}
 
 		if elem.Type == gjson.Null {
-			if !field.Optional {
+			write, err := writeMissingJSONField(field, opt.jsonConv)
+			if err != nil {
+				return err
+			}
+			if write {
 				if err := out.WriteFieldBegin(thrift.TType(field.Type.Type), int16(field.ID)); err != nil {
 					return err
 				}
-				if err := writeEmptyValue(out, field.Type, opt); err != nil {
+				var err error
+				if opt.jsonConv != nil && field.DefaultValue != nil {
+					err = getWriterAndWrite(ctx, field.DefaultValue, out, field.Type, opt)
+				} else {
+					err = writeEmptyValue(out, field.Type, opt)
+				}
+				if err != nil {
 					return fmt.Errorf("field (%d/%s) error: %w", field.ID, name, err)
 				}
 			}
 		} else {
-			v, writer, err := nextJSONWriter(&elem, field.Type, opt)
+			var v interface{}
+			var writer writer
+			var err error
+			if opt.jsonConv != nil && opt.jsonConv.EnableValueMapping && field.ValueMapping != nil {
+				v, err = field.ValueMapping.Request(ctx, elem.Value(), field)
+				if err == nil {
+					writer, err = nextWriter(v, field.Type, opt)
+				}
+			} else {
+				v, writer, err = nextJSONWriter(&elem, field.Type, opt)
+			}
 			if err != nil {
 				return fmt.Errorf("nextWriter of field[%s] error %w", name, err)
 			}

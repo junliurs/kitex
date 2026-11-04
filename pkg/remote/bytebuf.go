@@ -128,18 +128,18 @@ func (p *ByteBufferIO) Read(b []byte) (n int, err error) {
 	} else if len(b) <= readable {
 		buf, err = p.buffer.Next(len(b))
 		if err != nil {
-			return n, err
+			return
 		}
 		n = len(b)
 	} else {
 		buf, err = p.buffer.Next(readable)
 		if err != nil {
-			return n, err
+			return
 		}
 		n = readable
 	}
 	copy(b, buf)
-	return n, err
+	return
 }
 
 // ConsumedLen is an opt-in wire-size query; ByteBuffer.ReadLen keeps its old

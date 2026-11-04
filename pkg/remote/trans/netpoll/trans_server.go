@@ -59,7 +59,6 @@ type transServer struct {
 	ln        net.Listener
 	lncfg     net.ListenConfig
 	connCount utils.AtomicInt
-	stopped   bool // Protected by Mutex, including shutdown before bootstrap.
 	sync.Mutex
 }
 
@@ -80,48 +79,37 @@ func (ts *transServer) BootstrapServer(ln net.Listener) (err error) {
 	if ln == nil {
 		return errors.New("listener is nil in netpoll transport server")
 	}
+	ts.ln = ln
 	opts := []netpoll.Option{
 		netpoll.WithIdleTimeout(ts.opt.MaxConnectionIdleTime),
 		netpoll.WithReadTimeout(ts.opt.ReadWriteTimeout),
 	}
 
 	ts.Lock()
-	if ts.stopped {
-		ts.Unlock()
-		_ = ln.Close()
-		return nil
-	}
-	ts.ln = ln
 	opts = append(opts, netpoll.WithOnPrepare(ts.onConnActive))
 	if h, ok := ts.transHdlr.(remote.DisconnectHandler); ok {
 		opts = append(opts, netpoll.WithOnDisconnect(func(ctx context.Context, conn netpoll.Connection) { h.OnDisconnect(ctx, conn) }))
 	}
 	ts.evl, err = netpoll.NewEventLoop(ts.onConnRead, opts...)
+	ts.Unlock()
+
 	if err == nil {
 		// Convert the listener so that closing it also stops the
 		// event loop in netpoll.
+		ts.Lock()
 		ts.ln, err = netpoll.ConvertListener(ts.ln)
+		ts.Unlock()
 	}
-	evl, listener := ts.evl, ts.ln
-	ts.Unlock()
 	if err != nil {
 		return err
 	}
-	err = evl.Serve(listener)
-	ts.Lock()
-	stopped := ts.stopped
-	ts.Unlock()
-	if stopped && errors.Is(err, net.ErrClosed) {
-		return nil
-	}
-	return err
+	return ts.evl.Serve(ts.ln)
 }
 
 // Shutdown implements the remote.TransServer interface.
 func (ts *transServer) Shutdown() (err error) {
 	ts.Lock()
 	defer ts.Unlock()
-	ts.stopped = true
 
 	ctx, cancel := context.WithTimeout(context.Background(), ts.opt.ExitWaitTime)
 	defer cancel()
@@ -148,7 +136,7 @@ func (ts *transServer) Shutdown() (err error) {
 	if ts.evl != nil {
 		err = ts.evl.Shutdown(ctx)
 	}
-	return err
+	return
 }
 
 // ConnCount implements the remote.TransServer interface.

@@ -248,26 +248,25 @@ func (m meshHeader) decode(ctx context.Context, message remote.Message, in remot
 // but metahandlers are executed after payloadDecode, we don't know from_info when error happen in payloadDecode.
 // So 'fillBasicInfoOfTTHeader' is just for getting more info to output log when decode error happen.
 func fillBasicInfoOfTTHeader(msg remote.Message) {
-	headers := remote.AccessHeaders(msg.TransInfo())
 	if msg.RPCRole() == remote.Server {
 		fi := rpcinfo.AsMutableEndpointInfo(msg.RPCInfo().From())
 		if fi != nil {
-			if v := headers.String(transmeta.HeaderTransRemoteAddr); v != "" {
+			if v := msg.TransInfo().TransStrInfo()[transmeta.HeaderTransRemoteAddr]; v != "" {
 				fi.SetAddress(utils.NewNetAddr("tcp", v))
 			}
-			if v := headers.Int(transmeta.FromService); v != "" {
+			if v := msg.TransInfo().TransIntInfo()[transmeta.FromService]; v != "" {
 				fi.SetServiceName(v)
 			}
 		}
 		if ink, ok := msg.RPCInfo().Invocation().(rpcinfo.InvocationSetter); ok {
-			if svcName, ok := headers.StringValue(transmeta.HeaderIDLServiceName); ok {
+			if svcName, ok := msg.TransInfo().TransStrInfo()[transmeta.HeaderIDLServiceName]; ok {
 				ink.SetServiceName(svcName)
 			}
 		}
 	} else {
 		ti := remoteinfo.AsRemoteInfo(msg.RPCInfo().To())
 		if ti != nil {
-			if v := headers.String(transmeta.HeaderTransRemoteAddr); v != "" {
+			if v := msg.TransInfo().TransStrInfo()[transmeta.HeaderTransRemoteAddr]; v != "" {
 				ti.SetRemoteAddr(utils.NewNetAddr("tcp", v))
 			}
 		}

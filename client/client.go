@@ -135,7 +135,7 @@ func (kc *kClient) init() (err error) {
 	mw := kc.initMiddlewares(ctx)
 	kc.initDebugService()
 	kc.richRemoteOption()
-	if err = kc.buildInvokeChain(mw); err != nil {
+	if err = kc.buildInvokeChain(ctx, mw); err != nil {
 		return err
 	}
 	if err = kc.warmingUp(); err != nil {
@@ -148,14 +148,6 @@ func (kc *kClient) init() (err error) {
 func (kc *kClient) checkOptions() (err error) {
 	if kc.opt.Svr.ServiceName == "" {
 		return errors.New("service name is required")
-	}
-	if kc.opt.UnaryTransport != nil {
-		if err := kc.opt.UnaryTransport.Validate(kc.svcInfo, kc.opt.Configs); err != nil {
-			return err
-		}
-		if kc.opt.Proxy != nil || kc.opt.WarmUpOption != nil {
-			return errors.New("custom unary transport cannot be combined with a proxy or connection warmup")
-		}
 	}
 	return nil
 }
@@ -216,19 +208,6 @@ func (kc *kClient) initProxy() error {
 
 func (kc *kClient) initConnPool() error {
 	pool := kc.opt.RemoteOpt.ConnPool
-	if lifecycle, ok := kc.opt.UnaryTransport.(remote.ClientPoolLifecycle); ok {
-		unbind, err := lifecycle.ClientPool(pool)
-		if err != nil {
-			if unbind != nil {
-				unbind()
-			}
-			_ = pool.Close()
-			return err
-		}
-		if unbind != nil {
-			kc.opt.CloseCallbacks = append(kc.opt.CloseCallbacks, func() error { unbind(); return nil })
-		}
-	}
 	kc.opt.CloseCallbacks = append(kc.opt.CloseCallbacks, pool.Close)
 
 	if df, ok := pool.(interface{ Dump() interface{} }); ok {
@@ -298,8 +277,9 @@ func (kc *kClient) initLBCache() error {
 
 type middleware struct {
 	// unary middleware
-	mws  []endpoint.Middleware      // wrap the mws at `context mw -> customized mws -> other mws`
-	uMws []endpoint.UnaryMiddleware // wrap the mws at `service cb mw -> xds router -> rpctimeout mw -> customized unary mws`
+	mws      []endpoint.Middleware      // wrap the mws at `context mw -> customized mws -> other mws`
+	uMws     []endpoint.UnaryMiddleware // service circuit breaker and XDS router
+	userUMws []endpoint.UnaryMiddleware // inside the call execution boundary
 
 	// streaming middleware
 	smws []endpoint.Middleware  // wrap the mws at `xds router -> context mw -> customized mws -> other mws`
@@ -322,17 +302,11 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 	mw.mws = append(mw.mws, builderMWs...)
 	mw.mws = append(mw.mws, acl.NewACLMiddleware(kc.opt.ACLRules))
 	if kc.opt.Proxy == nil {
-		if !kc.opt.MiddlewareConfig.DisableServiceDiscovery {
-			mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
-		}
-		if !kc.opt.MiddlewareConfig.DisableInstanceCircuitBreaker {
-			mw.mws = append(mw.mws, kc.opt.CBSuite.InstanceCBMW())
-		}
-		if !kc.opt.MiddlewareConfig.DisableInstanceMiddlewares {
-			mw.mws = append(mw.mws, richMWsWithBuilder(ctx, kc.opt.IMWBs)...)
-		}
+		mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
+		mw.mws = append(mw.mws, kc.opt.CBSuite.InstanceCBMW())
+		mw.mws = append(mw.mws, richMWsWithBuilder(ctx, kc.opt.IMWBs)...)
 	} else {
-		if kc.opt.Resolver != nil && !kc.opt.MiddlewareConfig.DisableServiceDiscovery { // customized service discovery
+		if kc.opt.Resolver != nil { // customized service discovery
 			mw.mws = append(mw.mws, newResolveMWBuilder(kc.lbf)(ctx))
 		}
 		mw.mws = append(mw.mws, newProxyMW(kc.opt.Proxy))
@@ -341,26 +315,23 @@ func (kc *kClient) initMiddlewares(ctx context.Context) (mw middleware) {
 
 	// 2. unary middlewares
 	mw.uMws = append(mw.uMws, kc.opt.CBSuite.ServiceCBMW().ToUnaryMiddleware())
-	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil && !kc.opt.MiddlewareConfig.DisableXDSRouter {
+	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil {
 		// integrate xds if enabled
 		mw.uMws = append(mw.uMws, kc.opt.XDSRouterMiddleware.ToUnaryMiddleware())
 	}
-	if !kc.opt.MiddlewareConfig.DisableRPCTimeout {
-		mw.uMws = append(mw.uMws, rpcTimeoutMW(ctx))
-	}
 	kc.opt.UnaryOptions.InitMiddlewares(ctx)
-	mw.uMws = append(mw.uMws, kc.opt.UnaryOptions.UnaryMiddlewares...)
+	mw.userUMws = kc.opt.UnaryOptions.UnaryMiddlewares
 
 	// 3. stream middlewares
 	kc.opt.Streaming.InitMiddlewares(ctx)
 	mw.smws = mw.mws
-	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil && !kc.opt.MiddlewareConfig.DisableXDSRouter {
+	if kc.opt.XDSEnabled && kc.opt.XDSRouterMiddleware != nil && kc.opt.Proxy == nil {
 		// integrate xds if enabled
 		mw.smws = append([]endpoint.Middleware{kc.opt.XDSRouterMiddleware}, mw.smws...)
 	}
 	kc.opt.StreamOptions.InitMiddlewares(ctx)
 	mw.sMws = append([]cep.StreamMiddleware{kc.opt.CBSuite.StreamingServiceCBMW()}, kc.opt.StreamOptions.StreamMiddlewares...)
-	return mw
+	return
 }
 
 func richMWsWithBuilder(ctx context.Context, mwBs []endpoint.MiddlewareBuilder) (mws []endpoint.Middleware) {
@@ -369,7 +340,7 @@ func richMWsWithBuilder(ctx context.Context, mwBs []endpoint.MiddlewareBuilder) 
 			mws = append(mws, mw)
 		}
 	}
-	return mws
+	return
 }
 
 // initRPCInfo initializes the RPCInfo structure and attaches it to context.
@@ -505,22 +476,31 @@ func (kc *kClient) richRemoteOption() {
 	}
 }
 
-func (kc *kClient) buildInvokeChain(mw middleware) error {
-	innerHandlerEp, err := kc.invokeHandleEndpoint()
+func (kc *kClient) buildInvokeChain(ctx context.Context, mw middleware) error {
+	innerHandlerEp, handler, err := kc.invokeHandleEndpoint()
 	if err != nil {
 		return err
 	}
 	eps := endpoint.Chain(mw.mws...)(innerHandlerEp)
+	eps = endpoint.Endpoint(endpoint.UnaryChain(mw.userUMws...)(endpoint.UnaryEndpoint(eps)))
+	eps, err = kc.buildClientCall(ctx, remote.ClientCallUnary, handler, eps)
+	if err != nil {
+		return err
+	}
 
 	kc.eps = endpoint.UnaryChain(mw.uMws...)(func(ctx context.Context, req, resp interface{}) (err error) {
 		return eps(ctx, req, resp)
 	})
 
-	innerStreamingEp, err := kc.invokeStreamingEndpoint()
+	innerStreamingEp, streamHandler, err := kc.invokeStreamingEndpoint()
 	if err != nil {
 		return err
 	}
 	sEps := endpoint.Chain(mw.smws...)(innerStreamingEp)
+	sEps, err = kc.buildClientCall(ctx, remote.ClientCallStreaming, streamHandler, sEps)
+	if err != nil {
+		return err
+	}
 	kc.sEps = cep.StreamChain(mw.sMws...)(func(ctx context.Context) (st streaming.ClientStream, err error) {
 		resp := &streaming.Result{}
 		err = sEps(ctx, nil, resp)
@@ -532,13 +512,10 @@ func (kc *kClient) buildInvokeChain(mw middleware) error {
 	return nil
 }
 
-func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
+func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, remote.ClientTransHandler, error) {
 	transPipl, err := newCliTransHandler(kc.opt.RemoteOpt)
 	if err != nil {
-		return nil, err
-	}
-	if kc.opt.UnaryTransport != nil {
-		return kc.opt.UnaryTransport.NewEndpoint(kc.opt.RemoteOpt, kc.opt.MetaHandlers, transPipl, workerPool.RunTask)
+		return nil, nil, err
 	}
 	return func(ctx context.Context, req, resp interface{}) (err error) {
 		var sendMsg remote.Message
@@ -553,7 +530,7 @@ func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
 
 		cli, err := remotecli.NewClient(ctx, ri, transPipl, kc.opt.RemoteOpt)
 		if err != nil {
-			return err
+			return
 		}
 
 		defer cli.Recycle()
@@ -565,7 +542,7 @@ func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
 		}
 
 		if err = cli.Send(ctx, ri, sendMsg); err != nil {
-			return err
+			return
 		}
 		if m.OneWay() {
 			cli.Recv(ctx, ri, nil)
@@ -575,7 +552,7 @@ func (kc *kClient) invokeHandleEndpoint() (endpoint.Endpoint, error) {
 		recvMsg = remote.NewMessage(resp, ri, remote.Reply, remote.Client)
 		err = cli.Recv(ctx, ri, recvMsg)
 		return err
-	}, nil
+	}, transPipl, nil
 }
 
 // Close is not concurrency safe.
@@ -734,7 +711,7 @@ func getCalloptRetryPolicy(callOpts *callopt.CallOptions) (callOptRetry *retry.P
 			callOptRetry = &callOpts.RetryPolicy
 		}
 	}
-	return callOptRetry
+	return
 }
 
 func doFallbackIfNeeded(ctx context.Context, ri rpcinfo.RPCInfo, request, response interface{}, oriErr error, cliFallback *fallback.Policy, callOpts *callopt.CallOptions) (err, reportErr error) {
@@ -755,7 +732,7 @@ func doFallbackIfNeeded(ctx context.Context, ri rpcinfo.RPCInfo, request, respon
 	if err == nil && !hasFallback {
 		err = ri.Invocation().BizStatusErr()
 	}
-	return err, reportErr
+	return
 }
 
 // return fallback policy from call option and client option.

@@ -101,12 +101,24 @@ func (m *WriteJSON) originalWrite(ctx context.Context, out bufiox.Writer, msg in
 		requestBase = nil
 	}
 
+	var jsonOptions *conv.Options
+	if structuredJSON(ctx) {
+		jsonOptions, err = m.structuredOptions(requestBase)
+	}
+	if err != nil {
+		return err
+	}
+	binaryBase64 := m.base64Binary
+	if jsonOptions != nil {
+		binaryBase64 = !jsonOptions.NoBase64Binary
+	}
+	opt := &writerOption{requestBase: requestBase, binaryWithBase64: binaryBase64, jsonConv: jsonOptions}
 	bw := thrift.NewBufferWriter(out)
 	defer bw.Recycle()
 
 	// msg is void or nil
 	if _, ok := msg.(descriptor.Void); ok || msg == nil {
-		if err = wrapStructWriter(ctx, msg, bw, typeDsc, &writerOption{requestBase: requestBase, binaryWithBase64: m.base64Binary}); err != nil {
+		if err = wrapStructWriter(ctx, msg, bw, typeDsc, opt); err != nil {
 			return err
 		}
 		return err
@@ -129,12 +141,11 @@ func (m *WriteJSON) originalWrite(ctx context.Context, out bufiox.Writer, msg in
 		}
 	}
 
-	opt := &writerOption{requestBase: requestBase, binaryWithBase64: m.base64Binary}
 	if fnDsc.IsWithoutWrapping {
 		return jsonWriter(ctx, &body, typeDsc, opt, bw)
 	}
 
-	return wrapJSONWriter(ctx, &body, bw, typeDsc, &writerOption{requestBase: requestBase, binaryWithBase64: m.base64Binary})
+	return wrapJSONWriter(ctx, &body, bw, typeDsc, opt)
 }
 
 // NewReadJSON build ReadJSON according to ServiceDescriptor
@@ -236,14 +247,29 @@ func (m *ReadJSON) originalRead(ctx context.Context, method string, isClient boo
 	if !isClient {
 		tyDsc = fnDsc.Request
 	}
+	var jsonOptions *conv.Options
+	if structuredJSON(ctx) {
+		jsonOptions, err = m.structuredOptions(isClient)
+	}
+	if err != nil {
+		return nil, err
+	}
+	binaryBase64 := m.binaryWithBase64
+	if jsonOptions != nil {
+		binaryBase64 = !jsonOptions.NoBase64Binary
+	}
+	opt := &readerOption{fields: fieldCodec(ctx), forJSON: true, throwException: true, binaryWithBase64: binaryBase64, jsonConv: jsonOptions}
+	if jsonOptions != nil {
+		opt.throwException = jsonOptions.ConvertException
+	}
 	br := thrift.NewBufferReader(in)
 	defer br.Recycle()
 
 	if fnDsc.IsWithoutWrapping {
-		return structReader(ctx, tyDsc, &readerOption{fields: fieldCodec(ctx), forJSON: true, binaryWithBase64: m.binaryWithBase64}, br)
+		return structReader(ctx, tyDsc, opt, br)
 	}
 
-	resp, err := skipStructReader(ctx, br, tyDsc, &readerOption{fields: fieldCodec(ctx), forJSON: true, throwException: true, binaryWithBase64: m.binaryWithBase64})
+	resp, err := skipStructReader(ctx, br, tyDsc, opt)
 	if err != nil {
 		return nil, err
 	}

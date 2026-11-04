@@ -20,7 +20,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"reflect"
+	"strconv"
+
+	"github.com/cloudwego/dynamicgo/conv"
 
 	"github.com/cloudwego/gopkg/protocol/thrift"
 	"github.com/jhump/protoreflect/desc"
@@ -32,7 +36,8 @@ import (
 var emptyPbDsc = &desc.MessageDescriptor{}
 
 type readerOption struct {
-	fields FieldCodec
+	fields   FieldCodec
+	jsonConv *conv.Options
 	// result will be encode to json, so map[interface{}]interface{} will not be valid
 	// need use map[string]interface{} instead
 	forJSON bool
@@ -159,7 +164,14 @@ func readVoid(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeDe
 }
 
 func readDouble(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeDescriptor, opt *readerOption) (interface{}, error) {
-	return in.ReadDouble()
+	v, err := in.ReadDouble()
+	if err == nil && opt != nil && opt.jsonConv != nil && (math.IsInf(v, 0) || math.IsNaN(v)) {
+		if opt.jsonConv.EncodeNullJSONForInfOrNan {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("non-finite JSON number")
+	}
+	return v, err
 }
 
 func readBool(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeDescriptor, opt *readerOption) (interface{}, error) {
@@ -173,6 +185,9 @@ func readByte(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeDe
 	}
 	if opt.pbDsc != nil {
 		return int32(res), nil
+	}
+	if opt.jsonConv != nil && opt.jsonConv.ByteAsUint8 {
+		return uint8(res), nil
 	}
 	return res, nil
 }
@@ -193,7 +208,11 @@ func readInt32(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeD
 }
 
 func readInt64(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeDescriptor, opt *readerOption) (interface{}, error) {
-	return in.ReadI64()
+	v, err := in.ReadI64()
+	if err == nil && opt != nil && opt.jsonConv != nil && opt.jsonConv.Int642String {
+		return strconv.FormatInt(v, 10), nil
+	}
+	return v, err
 }
 
 func readString(ctx context.Context, in *thrift.BufferReader, t *descriptor.TypeDescriptor, opt *readerOption) (interface{}, error) {
@@ -356,8 +375,11 @@ func readStruct(ctx context.Context, in *thrift.BufferReader, t *descriptor.Type
 			}
 		}
 		for _, field := range t.Struct.DefaultFields {
+			if opt.jsonConv != nil {
+				continue
+			}
 			val := field.DefaultValue
-			if field.ValueMapping != nil {
+			if field.ValueMapping != nil && (opt.jsonConv == nil || opt.jsonConv.EnableValueMapping) {
 				if val, err = field.ValueMapping.Response(ctx, val, field); err != nil {
 					return nil, err
 				}
@@ -380,6 +402,23 @@ func readStruct(ctx context.Context, in *thrift.BufferReader, t *descriptor.Type
 			// check required
 			// void is nil struct
 			if t.Struct != nil {
+				if opt.jsonConv != nil {
+					for id, field := range t.Struct.FieldsByID {
+						if _, present := readFields[id]; present {
+							continue
+						}
+						write, err := writeMissingJSONField(field, opt.jsonConv)
+						if err != nil {
+							return nil, err
+						}
+						if write {
+							if err = fs(field, missingJSONValue(field)); err != nil {
+								return nil, err
+							}
+						}
+					}
+					return st, nil
+				}
 				if err := t.Struct.CheckRequired(readFields); err != nil {
 					return nil, err
 				}
@@ -388,6 +427,9 @@ func readStruct(ctx context.Context, in *thrift.BufferReader, t *descriptor.Type
 		}
 		field, ok := t.Struct.FieldsByID[int32(fieldID)]
 		if !ok {
+			if opt.jsonConv != nil && opt.jsonConv.DisallowUnknownField {
+				return nil, fmt.Errorf("unknown field %d", fieldID)
+			}
 			// just ignore the missing field, maybe server update its idls
 			if err := in.Skip(fieldType); err != nil {
 				return nil, err
@@ -408,7 +450,7 @@ func readStruct(ctx context.Context, in *thrift.BufferReader, t *descriptor.Type
 					return nil, err
 				}
 			}
-			if field.ValueMapping != nil {
+			if field.ValueMapping != nil && (opt.jsonConv == nil || opt.jsonConv.EnableValueMapping) {
 				if val, err = field.ValueMapping.Response(ctx, val, field); err != nil {
 					return nil, err
 				}

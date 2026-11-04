@@ -280,7 +280,7 @@ type timeoutContext struct {
 	ch chan struct{}
 
 	mu        sync.Mutex
-	err       atomic.Value // First error only; Err is on the ordinary request path.
+	err       error // Protected by mu.
 	callbacks *timeoutAfterFunc
 }
 
@@ -309,9 +309,11 @@ func (p *timeoutContext) Done() <-chan struct{} {
 }
 
 func (p *timeoutContext) Err() error {
-	if err := p.err.Load(); err != nil {
-		<-p.ch // Preserve close-before-error publication from the locked path.
-		return err.(error)
+	p.mu.Lock()
+	err := p.err
+	p.mu.Unlock()
+	if err != nil {
+		return err
 	}
 	return p.Context.Err()
 }
@@ -319,8 +321,8 @@ func (p *timeoutContext) Err() error {
 func (p *timeoutContext) Cancel(err error) {
 	var callbacks *timeoutAfterFunc
 	p.mu.Lock()
-	if err != nil && p.err.Load() == nil {
-		p.err.Store(err)
+	if err != nil && p.err == nil {
+		p.err = err
 		close(p.ch)
 		callbacks, p.callbacks = p.callbacks, nil
 		for f := callbacks; f != nil; f = f.next {
@@ -349,7 +351,7 @@ type timeoutAfterFunc struct {
 func (p *timeoutContext) AfterFunc(callback func()) func() bool {
 	f := &timeoutAfterFunc{parent: p}
 	p.mu.Lock()
-	if p.err.Load() != nil || p.Context.Err() != nil {
+	if p.err != nil || p.Context.Err() != nil {
 		p.mu.Unlock()
 		go callback()
 		return f.stop

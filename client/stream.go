@@ -50,9 +50,6 @@ type Streaming interface {
 
 // Stream implements the Streaming interface
 func (kc *kClient) Stream(ctx context.Context, method string, request, response interface{}) error {
-	if kc.opt.UnaryTransport != nil {
-		return remote.ErrUnaryTransportProtocol
-	}
 	if !kc.inited {
 		panic("client not initialized")
 	}
@@ -117,9 +114,6 @@ func (kc *kClient) Stream(ctx context.Context, method string, request, response 
 
 // StreamX implements the Streaming interface
 func (kc *kClient) StreamX(ctx context.Context, method string) (streaming.ClientStream, error) {
-	if kc.opt.UnaryTransport != nil {
-		return nil, remote.ErrUnaryTransportProtocol
-	}
 	if !kc.inited {
 		panic("client not initialized")
 	}
@@ -166,7 +160,7 @@ func (kc *kClient) StreamX(ctx context.Context, method string) (streaming.Client
 	return cs, err
 }
 
-func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, error) {
+func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, remote.ClientTransHandler, error) {
 	var handler remote.ClientTransHandler
 	var err error
 	if kc.opt.RemoteOpt.GRPCStreamingCliHandlerFactory != nil {
@@ -175,7 +169,7 @@ func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, error) {
 		handler, err = kc.opt.RemoteOpt.CliHandlerFactory.NewTransHandler(kc.opt.RemoteOpt)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// recvEP and sendEP are the endpoints for the new stream interface,
@@ -191,7 +185,7 @@ func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, error) {
 		ri := rpcinfo.GetRPCInfo(ctx)
 		st, scm, err := remotecli.NewStream(ctx, ri, handler, kc.opt.RemoteOpt)
 		if err != nil {
-			return err
+			return
 		}
 
 		clientStream := newStream(ctx, st, scm, kc, ri, ri.Invocation().MethodInfo().StreamingMode(),
@@ -200,7 +194,7 @@ func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, error) {
 		rresp.ClientStream = clientStream
 		rresp.Stream = clientStream.GetGRPCStream()
 		return err
-	}, nil
+	}, handler, nil
 }
 
 const (
@@ -263,7 +257,7 @@ func (s *stream) Header() (hd streaming.Header, err error) {
 	if hd, err = s.ClientStream.Header(); err != nil {
 		s.DoFinish(err)
 	}
-	return hd, err
+	return
 }
 
 // RecvMsg receives a message from the server.
@@ -289,7 +283,7 @@ func (s *stream) RecvMsg(ctx context.Context, m interface{}) (err error) {
 	if err != nil || s.streamingMode == serviceinfo.StreamingClient {
 		s.DoFinish(err)
 	}
-	return err
+	return
 }
 
 func (s *stream) handleStreamRecvEvent(err error) {
@@ -332,7 +326,7 @@ func (s *stream) SendMsg(ctx context.Context, m interface{}) (err error) {
 	if err != nil {
 		s.DoFinish(err)
 	}
-	return err
+	return
 }
 
 func (s *stream) handleStreamSendEvent(err error) {
@@ -392,7 +386,7 @@ func (s *grpcStream) Header() (md metadata.MD, err error) {
 	if md, err = s.Stream.Header(); err != nil {
 		s.st.DoFinish(err)
 	}
-	return md, err
+	return
 }
 
 func (s *grpcStream) RecvMsg(m interface{}) (err error) {
@@ -406,7 +400,7 @@ func (s *grpcStream) RecvMsg(m interface{}) (err error) {
 	if err != nil || s.st.streamingMode == serviceinfo.StreamingClient {
 		s.st.DoFinish(err)
 	}
-	return err
+	return
 }
 
 func (s *grpcStream) recvWithTimeout(m interface{}) error {
@@ -428,7 +422,7 @@ func (s *grpcStream) SendMsg(m interface{}) (err error) {
 	if err != nil {
 		s.st.DoFinish(err)
 	}
-	return err
+	return
 }
 
 func (s *grpcStream) DoFinish(err error) {

@@ -231,3 +231,19 @@ func TestMixedPolicyDeadlinesAndBorrowedSnapshots(t *testing.T) {
 	}
 	_ = p.Discard(c)
 }
+
+// The explicit per-lease policy must not change ordinary Get's historical
+// contract: expiration remains the ordinary eviction loop's responsibility.
+func TestOrdinaryGetKeepsLegacyExpirationBehavior(t *testing.T) {
+	p := newPool(0, 1, time.Hour)
+	c := &longConn{Conn: &retirementConn{address: netAddr{"tcp", "127.0.0.1:1"}}}
+	if !p.Put(c) {
+		t.Fatal("ordinary connection was not retained")
+	}
+	c.deadline = time.Now().Add(-time.Hour)
+	got, reused, _ := p.Get()
+	if !reused || got != c {
+		t.Fatal("ordinary Get applied the opt-in policy deadline")
+	}
+	_ = got.Close()
+}
