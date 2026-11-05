@@ -5,6 +5,8 @@ github.com/bytedance/gopkg v0.1.4/go.mod h1:v1zWfPm21Fb+OsyXN2VAHdL6TBb2L88anLQg
 github.com/cloudwego/thriftgo v0.3.18 h1:gnr1vz7G3RbwwCK9AMKHZf63VYGa7ene6WbI9VrBJSw=
 github.com/cloudwego/thriftgo v0.3.18/go.mod h1:AdLEJJVGW/ZJYvkkYAZf5SaJH+pA3OyC801WSwqcBwI=
 github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
+github.com/junliurs/cloudwego-gopkg v0.0.0-20261105192813-e9461b4bc999 h1:mSf8zc6KfnIYTJ7GyrHI0URNRBy8+A0cZG2VxB5/kh8=
+github.com/junliurs/cloudwego-gopkg v0.0.0-20261105192813-e9461b4bc999/go.mod h1:yK8wKouWJR6rbJ12Qb9VLTwbzcrg7c2rMAXHCfZT6h4=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
