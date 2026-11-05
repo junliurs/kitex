@@ -39,11 +39,10 @@ const (
 
 // Args generic request
 type Args struct {
-	codecExtension thrift.MessageCodecExtension
-	Request        interface{}
-	Method         string
-	base           *base.Base
-	inner          interface{}
+	Request interface{}
+	Method  string
+	base    *base.Base
+	inner   interface{}
 }
 
 var (
@@ -68,9 +67,6 @@ func (g *Args) Write(ctx context.Context, method string, out bufiox.Writer) erro
 		return err
 	}
 	if w, ok := g.inner.(thrift.MessageWriter); ok {
-		if g.codecExtension != nil {
-			ctx = g.codecExtension.CodecContext(ctx)
-		}
 		return w.Write(ctx, out, g.Request, method, true, g.base)
 	}
 	return fmt.Errorf("unexpected Args writer type: %T", g.inner)
@@ -91,20 +87,10 @@ func (g *Args) Read(ctx context.Context, method string, dataLen int, in bufiox.R
 	if err, ok := g.inner.(error); ok {
 		return err
 	}
-	if rw, ok := g.inner.(thrift.MessageReader); ok {
+	if rw, ok := decoratedCodec(ctx, g.inner, g.base).(thrift.MessageReader); ok {
 		g.Method = method
 		var err error
-		g.codecExtension, err = newCodecExtension(ctx, g.inner, method, false)
-		if err != nil {
-			return err
-		}
-		if g.codecExtension != nil {
-			ctx = g.codecExtension.CodecContext(ctx)
-		}
 		g.Request, err = rw.Read(ctx, method, false, dataLen, in)
-		if err == nil && g.codecExtension != nil {
-			g.Request, err = g.codecExtension.Decoded(g.Request)
-		}
 		return err
 	}
 	return fmt.Errorf("unexpected Args reader type: %T", g.inner)
@@ -130,9 +116,8 @@ func (g *Args) GetFirstArgument() interface{} {
 
 // Result generic response
 type Result struct {
-	codecExtension thrift.MessageCodecExtension
-	Success        interface{}
-	inner          interface{}
+	Success interface{}
+	inner   interface{}
 }
 
 var (
@@ -151,9 +136,6 @@ func (r *Result) Write(ctx context.Context, method string, out bufiox.Writer) er
 		return err
 	}
 	if w, ok := r.inner.(thrift.MessageWriter); ok {
-		if r.codecExtension != nil {
-			ctx = r.codecExtension.CodecContext(ctx)
-		}
 		return w.Write(ctx, out, r.Success, method, false, nil)
 	}
 	return fmt.Errorf("unexpected Result writer type: %T", r.inner)
@@ -174,19 +156,9 @@ func (r *Result) Read(ctx context.Context, method string, dataLen int, in bufiox
 	if err, ok := r.inner.(error); ok {
 		return err
 	}
-	if w, ok := r.inner.(thrift.MessageReader); ok {
+	if w, ok := decoratedCodec(ctx, r.inner, nil).(thrift.MessageReader); ok {
 		var err error
-		r.codecExtension, err = newCodecExtension(ctx, r.inner, method, true)
-		if err != nil {
-			return err
-		}
-		if r.codecExtension != nil {
-			ctx = r.codecExtension.CodecContext(ctx)
-		}
 		r.Success, err = w.Read(ctx, method, true, dataLen, in)
-		if err == nil && r.codecExtension != nil {
-			r.Success, err = r.codecExtension.Decoded(r.Success)
-		}
 		return err
 	}
 	return fmt.Errorf("unexpected Result reader type: %T", r.inner)

@@ -136,8 +136,8 @@ func (m *ReadStruct) Read(ctx context.Context, method string, isClient bool, dat
 	defer br.Recycle()
 
 	if fnDsc.IsWithoutWrapping {
-		return readStruct(ctx, br, fDsc, &readerOption{fields: fieldCodec(ctx), throwException: true, forJSON: m.forJSON, binaryWithBase64: m.binaryWithBase64, binaryWithByteSlice: m.binaryWithByteSlice, setFieldsForEmptyStruct: m.setFieldsForEmptyStruct})
+		return readStruct(ctx, br, fDsc, &readerOption{throwException: true, forJSON: m.forJSON, binaryWithBase64: m.binaryWithBase64, binaryWithByteSlice: m.binaryWithByteSlice, setFieldsForEmptyStruct: m.setFieldsForEmptyStruct})
 	} else {
-		return skipStructReader(ctx, br, fDsc, &readerOption{fields: fieldCodec(ctx), throwException: true, forJSON: m.forJSON, binaryWithBase64: m.binaryWithBase64, binaryWithByteSlice: m.binaryWithByteSlice, setFieldsForEmptyStruct: m.setFieldsForEmptyStruct})
+		return skipStructReader(ctx, br, fDsc, &readerOption{throwException: true, forJSON: m.forJSON, binaryWithBase64: m.binaryWithBase64, binaryWithByteSlice: m.binaryWithByteSlice, setFieldsForEmptyStruct: m.setFieldsForEmptyStruct})
 	}
 }

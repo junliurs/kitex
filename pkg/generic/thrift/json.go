@@ -101,24 +101,12 @@ func (m *WriteJSON) originalWrite(ctx context.Context, out bufiox.Writer, msg in
 		requestBase = nil
 	}
 
-	var jsonOptions *conv.Options
-	if structuredJSON(ctx) {
-		jsonOptions, err = m.structuredOptions(requestBase)
-	}
-	if err != nil {
-		return err
-	}
-	binaryBase64 := m.base64Binary
-	if jsonOptions != nil {
-		binaryBase64 = !jsonOptions.NoBase64Binary
-	}
-	opt := &writerOption{requestBase: requestBase, binaryWithBase64: binaryBase64, jsonConv: jsonOptions}
 	bw := thrift.NewBufferWriter(out)
 	defer bw.Recycle()
 
 	// msg is void or nil
 	if _, ok := msg.(descriptor.Void); ok || msg == nil {
-		if err = wrapStructWriter(ctx, msg, bw, typeDsc, opt); err != nil {
+		if err = wrapStructWriter(ctx, msg, bw, typeDsc, &writerOption{requestBase: requestBase, binaryWithBase64: m.base64Binary}); err != nil {
 			return err
 		}
 		return err
@@ -141,11 +129,12 @@ func (m *WriteJSON) originalWrite(ctx context.Context, out bufiox.Writer, msg in
 		}
 	}
 
+	opt := &writerOption{requestBase: requestBase, binaryWithBase64: m.base64Binary}
 	if fnDsc.IsWithoutWrapping {
 		return jsonWriter(ctx, &body, typeDsc, opt, bw)
 	}
 
-	return wrapJSONWriter(ctx, &body, bw, typeDsc, opt)
+	return wrapJSONWriter(ctx, &body, bw, typeDsc, &writerOption{requestBase: requestBase, binaryWithBase64: m.base64Binary})
 }
 
 // NewReadJSON build ReadJSON according to ServiceDescriptor
@@ -184,7 +173,7 @@ func (m *ReadJSON) SetDynamicGo(convOpts, convOptsWithException *conv.Options) {
 // Read read data from in thrift.TProtocol and convert to json string
 func (m *ReadJSON) Read(ctx context.Context, method string, isClient bool, dataLen int, in bufiox.Reader) (interface{}, error) {
 	// fallback logic
-	if !m.dynamicgoEnabled || dataLen <= 0 || structuredJSON(ctx) {
+	if !m.dynamicgoEnabled || dataLen <= 0 {
 		return m.originalRead(ctx, method, isClient, in)
 	}
 
@@ -247,29 +236,14 @@ func (m *ReadJSON) originalRead(ctx context.Context, method string, isClient boo
 	if !isClient {
 		tyDsc = fnDsc.Request
 	}
-	var jsonOptions *conv.Options
-	if structuredJSON(ctx) {
-		jsonOptions, err = m.structuredOptions(isClient)
-	}
-	if err != nil {
-		return nil, err
-	}
-	binaryBase64 := m.binaryWithBase64
-	if jsonOptions != nil {
-		binaryBase64 = !jsonOptions.NoBase64Binary
-	}
-	opt := &readerOption{fields: fieldCodec(ctx), forJSON: true, throwException: true, binaryWithBase64: binaryBase64, jsonConv: jsonOptions}
-	if jsonOptions != nil {
-		opt.throwException = jsonOptions.ConvertException
-	}
 	br := thrift.NewBufferReader(in)
 	defer br.Recycle()
 
 	if fnDsc.IsWithoutWrapping {
-		return structReader(ctx, tyDsc, opt, br)
+		return structReader(ctx, tyDsc, &readerOption{forJSON: true, binaryWithBase64: m.binaryWithBase64}, br)
 	}
 
-	resp, err := skipStructReader(ctx, br, tyDsc, opt)
+	resp, err := skipStructReader(ctx, br, tyDsc, &readerOption{forJSON: true, throwException: true, binaryWithBase64: m.binaryWithBase64})
 	if err != nil {
 		return nil, err
 	}
@@ -284,9 +258,6 @@ func (m *ReadJSON) originalRead(ctx context.Context, method string, isClient boo
 		return resp, nil
 	}
 
-	if options := codecOptions(ctx); options != nil && options.JSONResult != nil {
-		return options.JSONResult(resp)
-	}
 	// resp is map
 	// note: use json-iterator since sonic doesn't support map[interface{}]interface{}
 	respNode, err := jsoniter.Marshal(resp)
@@ -332,7 +303,7 @@ func structReader(ctx context.Context, typeDesc *descriptor.TypeDescriptor, opt 
 // Write write json string to out thrift.TProtocol
 func (m *WriteJSON) Write(ctx context.Context, out bufiox.Writer, msg interface{}, method string, isClient bool, requestBase *base.Base) error {
 	// fallback logic
-	if !m.dynamicgoEnabled || structuredJSON(ctx) {
+	if !m.dynamicgoEnabled {
 		return m.originalWrite(ctx, out, msg, method, isClient, requestBase)
 	}
 
