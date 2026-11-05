@@ -30,12 +30,12 @@ func TestHeaderCodecRoundTrip(t *testing.T) {
 				defer remote.RecycleMessage(send)
 				send.RPCInfo().Invocation().(rpcinfo.InvocationSetter).SetSeqID(42)
 
-				headers := remote.AccessHeaders(send.TransInfo())
-				headers.SetInt(transmeta.FromService, "source-service")
-				headers.SetInt(60000, "unknown-int")
-				headers.SetString(transmeta.HeaderIDLServiceName, "idl-service")
-				headers.SetString(transmeta.HeaderTransRemoteAddr, "127.0.0.1:9299")
-				headers.SetString("unknown-string", "kept")
+				headers := send.TransInfo()
+				headers.TransIntInfo()[transmeta.FromService] = "source-service"
+				headers.TransIntInfo()[60000] = "unknown-int"
+				headers.TransStrInfo()[transmeta.HeaderIDLServiceName] = "idl-service"
+				headers.TransStrInfo()[transmeta.HeaderTransRemoteAddr] = "127.0.0.1:9299"
+				headers.TransStrInfo()["unknown-string"] = "kept"
 				buf := tb.NewBuffer()
 				length, err := ttHeaderCodec.encode(ctx, send, buf)
 				if err != nil {
@@ -60,8 +60,8 @@ func TestHeaderCodecRoundTrip(t *testing.T) {
 				if err = ttHeaderCodec.decode(ctx, recv, buf); err != nil {
 					t.Fatal(err)
 				}
-				decoded := remote.AccessHeaders(recv.TransInfo())
-				if decoded.Int(60000) != "unknown-int" || decoded.String("unknown-string") != "kept" {
+				decoded := recv.TransInfo()
+				if decoded.TransIntInfo()[60000] != "unknown-int" || decoded.TransStrInfo()["unknown-string"] != "kept" {
 					t.Fatal("decode or fillBasicInfo lost unknown headers")
 				}
 
@@ -77,7 +77,7 @@ func TestHeaderCodecRoundTrip(t *testing.T) {
 					t.Fatal("public map lost decoded values")
 				}
 				public["unknown-string"] = "direct-write"
-				if decoded.String("unknown-string") != "direct-write" {
+				if decoded.TransStrInfo()["unknown-string"] != "direct-write" {
 					t.Fatal("public map was detached")
 				}
 			})

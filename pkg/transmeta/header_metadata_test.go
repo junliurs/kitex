@@ -39,18 +39,22 @@ func headerMetadataMessage(t *testing.T, response bool) remote.Message {
 
 func headerMetadataHeaders(info remote.TransInfo) (map[uint16]string, map[string]string) {
 	ints, strings := make(map[uint16]string), make(map[string]string)
-	h := remote.AccessHeaders(info)
-	h.RangeInt(func(k uint16, v string) bool { ints[k] = v; return true })
-	h.RangeString(func(k, v string) bool { strings[k] = v; return true })
+	h := info
+	for k, v := range h.TransIntInfo() {
+		ints[k] = v
+	}
+	for k, v := range h.TransStrInfo() {
+		strings[k] = v
+	}
 	return ints, strings
 }
 
 func TestHeaderClientTTHeaderMetadata(t *testing.T) {
 	for _, locked := range []bool{false, true} {
 		msg := headerMetadataMessage(t, false)
-		h := remote.AccessHeaders(msg.TransInfo())
-		h.SetInt(65535, "unknown")
-		h.SetString("preserved", "value")
+		h := msg.TransInfo()
+		h.TransIntInfo()[65535] = "unknown"
+		h.TransStrInfo()["preserved"] = "value"
 		if locked {
 			cfg := rpcinfo.AsMutableRPCConfig(msg.RPCInfo().Config())
 			cfg.LockConfig(rpcinfo.BitRPCTimeout)
@@ -74,8 +78,8 @@ func TestHeaderClientTTHeaderMetadata(t *testing.T) {
 func TestHeaderServerTTHeaderRead(t *testing.T) {
 	for _, timeout := range []string{"97", "", "invalid"} {
 		msg := headerMetadataMessage(t, false)
-		h := remote.AccessHeaders(msg.TransInfo())
-		h.MergeInt(map[uint16]string{transmeta.FromService: "caller", transmeta.FromMethod: "Call", transmeta.RPCTimeout: timeout})
+		h := msg.TransInfo()
+		h.PutTransIntInfo(map[uint16]string{transmeta.FromService: "caller", transmeta.FromMethod: "Call", transmeta.RPCTimeout: timeout})
 		if _, err := ServerTTHeaderHandler.ReadMeta(context.Background(), msg); err != nil {
 			t.Fatal(err)
 		}
@@ -99,11 +103,11 @@ func TestHeaderResponseTTHeaderMetadata(t *testing.T) {
 	if _, err := ClientTTHeaderHandler.ReadMeta(context.Background(), msg); err != nil {
 		t.Fatal(err)
 	}
-	h := remote.AccessHeaders(msg.TransInfo())
-	if val, ok := h.StringValue(transmeta.HeaderConnectionReadyToReset); !ok || val != "" {
+	h := msg.TransInfo()
+	if val, ok := h.TransStrInfo()[transmeta.HeaderConnectionReadyToReset]; !ok || val != "" {
 		t.Fatal("empty reset header presence was lost")
 	}
-	if h.String(bizStatus) != "17" || h.String(bizMessage) != "denied" || h.String(bizExtra) != `{"reason":"policy"}` {
+	if h.TransStrInfo()[bizStatus] != "17" || h.TransStrInfo()[bizMessage] != "denied" || h.TransStrInfo()[bizExtra] != `{"reason":"policy"}` {
 		t.Fatal("business status was lost")
 	}
 
@@ -112,7 +116,7 @@ func TestHeaderResponseTTHeaderMetadata(t *testing.T) {
 func TestHeaderMetainfoBackwardAllFields(t *testing.T) {
 	fields := map[string]string{"ordinary": "visible", "": "empty-key", "empty-value": "", metainfo.PrefixTransient + "meta": "value"}
 	msg := headerMetadataMessage(t, true)
-	remote.AccessHeaders(msg.TransInfo()).MergeString(fields)
+	msg.TransInfo().PutTransStrInfo(fields)
 	ctx := metainfo.WithBackwardValues(context.Background())
 	metainfo.SetBackwardValue(ctx, "retained", "old")
 	metainfo.SetBackwardValue(ctx, "ordinary", "overwrite")
@@ -164,7 +168,7 @@ func TestHeaderEmptyMapAlias(t *testing.T) {
 	other.TransInfo().PutTransStrInfo(map[string]string{})
 	other.TransInfo().PutTransStrInfo(replacement)
 	replacement["replacement"] = "second"
-	if remote.AccessHeaders(other.TransInfo()).String("replacement") != "second" {
+	if other.TransInfo().TransStrInfo()["replacement"] != "second" {
 		t.Fatal("Put failed to preserve replacement map alias")
 	}
 }

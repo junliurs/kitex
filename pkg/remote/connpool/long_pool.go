@@ -74,16 +74,6 @@ type longConn struct {
 	sync.RWMutex
 	deadline time.Time
 	address  string
-	id       uint64
-	owner    *peer // Stable across address removal and replacement.
-	policy   remote.ConnectionPolicy
-}
-
-func (c *longConn) ConnID() uint64 {
-	if c.id == 0 {
-		c.id = remote.NextConnID()
-	}
-	return c.id
 }
 
 // Close implements the net.Conn interface.
@@ -129,7 +119,6 @@ func newPool(minIdle, maxIdle int, maxIdleTimeout time.Duration) *pool {
 type pool struct {
 	idleList []*longConn // idleList Get/Put by FILO(stack) but Evict by FIFO(queue)
 	mu       sync.RWMutex
-	closed   bool
 	// config
 	minIdle        int
 	maxIdle        int           // currIdle <= maxIdle.
@@ -138,10 +127,6 @@ type pool struct {
 
 // Get gets the first active connection from the idleList. Return the number of connections decreased during the Get.
 func (p *pool) Get() (*longConn, bool, int) {
-	return p.getPolicy(remote.ConnectionPolicy{})
-}
-
-func (p *pool) getPolicy(policy remote.ConnectionPolicy) (*longConn, bool, int) {
 	p.mu.Lock()
 	// Get the first active one
 	n := len(p.idleList)
@@ -150,7 +135,7 @@ func (p *pool) getPolicy(policy remote.ConnectionPolicy) (*longConn, bool, int) 
 		o := p.idleList[selected]
 		// reset slice element to nil, active conn object only could be hold reference by user function
 		p.idleList[selected] = nil
-		if o.policy == policy && o.IsActive() && (!policy.Enabled || !o.Expired()) {
+		if o.IsActive() {
 			p.idleList = p.idleList[:selected]
 			p.mu.Unlock()
 			return o, true, n - selected
@@ -171,17 +156,8 @@ func (p *pool) getPolicy(policy remote.ConnectionPolicy) (*longConn, bool, int) 
 func (p *pool) Put(o *longConn) bool {
 	p.mu.Lock()
 	var recycled bool
-	limit, timeout := p.maxIdle, p.maxIdleTimeout
-	if o.policy.Enabled {
-		if uint64(o.policy.MaxIdleConnections) < uint64(limit) {
-			limit = int(o.policy.MaxIdleConnections)
-		}
-		if o.policy.IdleTimeout < timeout {
-			timeout = o.policy.IdleTimeout
-		}
-	}
-	if !p.closed && len(p.idleList) < limit && (!o.policy.Enabled || timeout > 0) {
-		o.deadline = time.Now().Add(timeout)
+	if len(p.idleList) < p.maxIdle {
+		o.deadline = time.Now().Add(p.maxIdleTimeout)
 		p.idleList = append(p.idleList, o)
 		recycled = true
 	}
@@ -193,21 +169,19 @@ func (p *pool) Put(o *longConn) bool {
 // Evict returns how many connections has been evicted.
 func (p *pool) Evict() (evicted int) {
 	p.mu.Lock()
-	nonIdle, n := len(p.idleList)-p.minIdle, len(p.idleList)
-	kept := 0
-	for i, o := range p.idleList {
-		if (i < nonIdle || o.policy.Enabled) && o.Expired() {
-			o.Close()
-			evicted++
-		} else {
-			p.idleList[kept] = o
-			kept++
+	nonIdle := len(p.idleList) - p.minIdle
+	// clear non idle connections
+	for ; evicted < nonIdle; evicted++ {
+		if !p.idleList[evicted].Expired() {
+			break
 		}
+		// close the inactive object
+		p.idleList[evicted].Close()
+		// reset slice element to nil, otherwise it will cause the connections will never be destroyed
+		// TODO: use clear(unused_slice) when we no need to care about < go1.18
+		p.idleList[evicted] = nil
 	}
-	for i := kept; i < n; i++ {
-		p.idleList[i] = nil
-	}
-	p.idleList = p.idleList[:kept]
+	p.idleList = p.idleList[evicted:]
 	p.mu.Unlock()
 	return evicted
 }
@@ -223,7 +197,6 @@ func (p *pool) Len() int {
 // Close closes the pool and all the objects in the pool.
 func (p *pool) Close() int {
 	p.mu.Lock()
-	p.closed = true
 	num := len(p.idleList)
 	for i := 0; i < num; i++ {
 		p.idleList[i].Close()
@@ -278,12 +251,8 @@ type peer struct {
 
 // Get gets a connection with dialer and timeout. Dial a new connection if no idle connection in pool is available.
 func (p *peer) Get(d remote.Dialer, timeout time.Duration, reporter Reporter, addr string) (net.Conn, error) {
-	return p.getPolicy(d, timeout, reporter, addr, remote.ConnectionPolicy{})
-}
-
-func (p *peer) getPolicy(d remote.Dialer, timeout time.Duration, reporter Reporter, addr string, policy remote.ConnectionPolicy) (net.Conn, error) {
 	var c net.Conn
-	c, reused, decNum := p.pool.getPolicy(policy)
+	c, reused, decNum := p.pool.Get()
 	p.globalIdle.DecN(int64(decNum))
 	if reused {
 		reporter.ReuseSucceed(Long, p.serviceName, p.addr)
@@ -299,8 +268,6 @@ func (p *peer) getPolicy(d remote.Dialer, timeout time.Duration, reporter Report
 	return &longConn{
 		Conn:    c,
 		address: addr,
-		owner:   p,
-		policy:  policy,
 	}, nil
 }
 
@@ -344,8 +311,7 @@ func NewLongPool(serviceName string, idlConfig connpool.IdleConfig) *LongPool {
 				idlConfig.MinIdlePerAddress,
 				idlConfig.MaxIdlePerAddress,
 				idlConfig.MaxIdleTimeout,
-				limit,
-			)
+				limit)
 		},
 		idleConfig: idlConfig,
 	}
@@ -373,8 +339,6 @@ func (lp *LongPool) Get(ctx context.Context, network, address string, opt remote
 	return p.Get(opt.Dialer, opt.ConnectTimeout, lp.reporter, address)
 }
 
-func (*LongPool) SupportsConnectionPolicy() bool { return true }
-
 // Put implements the ConnPool interface.
 func (lp *LongPool) Put(conn net.Conn) error {
 	c, ok := conn.(*longConn)
@@ -385,7 +349,7 @@ func (lp *LongPool) Put(conn net.Conn) error {
 	addr := conn.RemoteAddr()
 	na := netAddr{addr.Network(), c.address}
 	p, ok := lp.peerMap.Load(na)
-	if ok && p == c.owner {
+	if ok {
 		p.(*peer).Put(c)
 		return nil
 	}
@@ -404,20 +368,10 @@ func (lp *LongPool) Discard(conn net.Conn) error {
 // Clean implements the LongConnPool interface.
 func (lp *LongPool) Clean(network, address string) {
 	na := netAddr{network, address}
-	if p, ok := lp.peerMap.LoadAndDelete(na); ok {
-		p.(*peer).Close()
+	if p, ok := lp.peerMap.Load(na); ok {
+		lp.peerMap.Delete(na)
+		go p.(*peer).Close()
 	}
-}
-
-// CleanAll retires existing peer generations after a discovery history gap.
-// New peers created concurrently already use fresh connections.
-func (lp *LongPool) CleanAll() {
-	lp.peerMap.Range(func(key, value any) bool {
-		if lp.peerMap.CompareAndDelete(key, value) {
-			value.(*peer).Close()
-		}
-		return true
-	})
 }
 
 // Dump is used to dump current long pool info when needed, like debug query.
@@ -485,10 +439,4 @@ func (lp *LongPool) getPeer(addr netAddr) *peer {
 	}
 	p, _ = lp.peerMap.LoadOrStore(addr, lp.newPeer(addr))
 	return p.(*peer)
-}
-
-// GetWithPolicy is the explicit governance path; Get keeps its legacy contract.
-func (lp *LongPool) GetWithPolicy(ctx context.Context, network, address string, opt remote.ConnOption, policy remote.ConnectionPolicy) (net.Conn, error) {
-	p := lp.getPeer(netAddr{network, address})
-	return p.getPolicy(opt.Dialer, opt.ConnectTimeout, lp.reporter, address, policy)
 }

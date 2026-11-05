@@ -193,7 +193,7 @@ func (kc *kClient) invokeStreamingEndpoint() (endpoint.Endpoint, remote.ClientTr
 		rresp := resp.(*streaming.Result)
 		rresp.ClientStream = clientStream
 		rresp.Stream = clientStream.GetGRPCStream()
-		return err
+		return
 	}, handler, nil
 }
 

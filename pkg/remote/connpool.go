@@ -28,14 +28,6 @@ type ConnOption struct {
 	ConnectTimeout time.Duration
 }
 
-// Per-attempt constraints selected by governance. Framework idle/global limits
-// remain upper bounds; policy is copied with the borrowed connection.
-type ConnectionPolicy struct {
-	Enabled            bool
-	IdleTimeout        time.Duration
-	MaxIdleConnections uint32
-}
-
 // ConnPool is used to get connections.
 type ConnPool interface {
 	// Get returns a connection to the given address.
@@ -73,9 +65,4 @@ type RawConn interface {
 // IsActive is used to check if the connection is active.
 type IsActive interface {
 	IsActive() bool
-}
-
-// ConnectionPolicyPool supports a connection policy for an individual lease.
-type ConnectionPolicyPool interface {
-	GetWithPolicy(context.Context, string, string, ConnOption, ConnectionPolicy) (net.Conn, error)
 }

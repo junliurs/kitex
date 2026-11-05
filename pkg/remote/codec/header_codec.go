@@ -81,13 +81,13 @@ const (
 type ttHeader struct{}
 
 func (t ttHeader) encode(ctx context.Context, message remote.Message, out remote.ByteBuffer) (totalLenField []byte, err error) {
-	headers := remote.AccessHeaders(message.TransInfo())
+	tm := message.TransInfo()
 	if reserve, ok := out.(interface{ ReserveFrame(int) error }); ok {
 		data, ok := message.Data().(interface{ BLength() int })
 		if !ok {
 			return nil, fmt.Errorf("frame reservation requires a sized payload")
 		}
-		ints, strings := headers.LegacyMaps()
+		ints, strings := tm.TransIntInfo(), tm.TransStrInfo()
 		h, ns := 2, 0
 		for k, v := range strings {
 			if k == ttheader.GDPRToken {
@@ -113,10 +113,12 @@ func (t ttHeader) encode(ctx context.Context, message remote.Message, out remote
 			return nil, err
 		}
 	}
-	if totalLenField, err = headers.EncodeTTHeader(ctx, ttheader.EncodeParam{
+	if totalLenField, err = ttheader.Encode(ctx, ttheader.EncodeParam{
 		Flags:      getFlags(message),
 		SeqID:      message.RPCInfo().Invocation().SeqID(),
 		ProtocolID: getProtocolID(message.RPCInfo().Config().PayloadCodec()),
+		IntInfo:    tm.TransIntInfo(),
+		StrInfo:    tm.TransStrInfo(),
 	}, out); err != nil {
 		return nil, perrors.NewProtocolError(err)
 	}
@@ -124,8 +126,8 @@ func (t ttHeader) encode(ctx context.Context, message remote.Message, out remote
 }
 
 func (t ttHeader) decode(ctx context.Context, message remote.Message, in remote.ByteBuffer) (err error) {
-	param, err := remote.AccessHeaders(message.TransInfo()).DecodeTTHeader(ctx, in)
-	if err != nil {
+	var param ttheader.DecodeParam
+	if param, err = ttheader.Decode(ctx, in); err != nil {
 		return perrors.NewProtocolError(err)
 	}
 	if h := remote.MessageEventHandlerFromContext(ctx); h != nil {
@@ -139,6 +141,8 @@ func (t ttHeader) decode(ctx context.Context, message remote.Message, in remote.
 		// some framework doesn't write correct seqID in TTheader, to ignore err only check it in payload
 		// print log to push the downstream framework to refine it.
 	}
+	message.TransInfo().PutTransIntInfo(param.IntInfo)
+	message.TransInfo().PutTransStrInfo(param.StrInfo)
 	fillBasicInfoOfTTHeader(message)
 	message.SetPayloadLen(param.PayloadLen)
 	return nil

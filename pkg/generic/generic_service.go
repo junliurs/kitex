@@ -96,10 +96,7 @@ func ServiceInfoWithGeneric(g Generic) *serviceinfo.ServiceInfo {
 
 func callHandler(ctx context.Context, handler, arg, result interface{}) error {
 	realArg := arg.(*Args)
-	var realResult *Result
-	if result != nil {
-		realResult = result.(*Result)
-	}
+	realResult := result.(*Result)
 	switch svc := handler.(type) {
 	case *ServiceV2:
 		ri := rpcinfo.GetRPCInfo(ctx)
@@ -112,18 +109,14 @@ func callHandler(ctx context.Context, handler, arg, result interface{}) error {
 		if err != nil {
 			return err
 		}
-		if realResult != nil {
-			realResult.Success = success
-		}
+		realResult.Success = success
 		return nil
 	case Service:
 		success, err := handler.(Service).GenericCall(ctx, realArg.Method, realArg.Request)
 		if err != nil {
 			return err
 		}
-		if realResult != nil {
-			realResult.Success = success
-		}
+		realResult.Success = success
 		return nil
 	default:
 		return fmt.Errorf("CallHandler: unknown handler type %T", handler)
