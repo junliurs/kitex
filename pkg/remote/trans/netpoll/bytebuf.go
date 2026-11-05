@@ -62,12 +62,10 @@ func newNetpollByteBuffer() interface{} {
 }
 
 type netpollByteBuffer struct {
-	writer        netpoll.Writer
-	reader        netpoll.Reader
-	status        int
-	readSize      int
-	captureMark   netpoll.ReadMark
-	captureMarked bool
+	writer   netpoll.Writer
+	reader   netpoll.Reader
+	status   int
+	readSize int
 }
 
 var _ remote.ByteBuffer = &netpollByteBuffer{}
@@ -278,8 +276,6 @@ func (b *netpollByteBuffer) zero() {
 	b.reader = nil
 	b.status = 0
 	b.readSize = 0
-	b.captureMark = netpoll.ReadMark{}
-	b.captureMarked = false
 }
 
 // GetWrittenBytes gets all written bytes from linkbuffer.
@@ -288,64 +284,4 @@ func GetWrittenBytes(lb *netpoll.LinkBuffer) (buf []byte, err error) {
 		return nil, err
 	}
 	return lb.Bytes(), nil
-}
-
-// BeginBorrowedMessage records a cursor only; no recording data is prepared
-// until governance has selected this message for Capture.
-func (b *netpollByteBuffer) BeginBorrowedMessage() {
-	b.captureMarked = false
-	if r, ok := b.reader.(interface{ MarkRead() netpoll.ReadMark }); ok {
-		b.captureMark, b.captureMarked = r.MarkRead(), true
-	}
-}
-
-func (b *netpollByteBuffer) BorrowConsumedMessage(dst [][]byte) [][]byte {
-	if b.captureMarked {
-		if r, ok := b.reader.(interface {
-			ConsumedSlices(netpoll.ReadMark, [][]byte) [][]byte
-		}); ok {
-			return r.ConsumedSlices(b.captureMark, dst)
-		}
-	}
-	return dst
-}
-
-func (b *netpollByteBuffer) WaitReadable(n int) error {
-	if r, ok := b.reader.(interface{ WaitReadable(int) error }); ok {
-		return r.WaitReadable(n)
-	}
-	_, err := b.reader.Peek(n)
-	return err
-}
-
-func (b *netpollByteBuffer) BorrowMessage(remaining int, dst [][]byte) ([][]byte, error) {
-	if !b.captureMarked {
-		return dst, errors.New("message has no retained read cursor")
-	}
-	parts := b.BorrowConsumedMessage(dst)
-	if remaining == 0 {
-		return parts, nil
-	}
-	if r, ok := b.reader.(interface {
-		PeekSlices(int, [][]byte) ([][]byte, error)
-	}); ok {
-		return r.PeekSlices(remaining, parts)
-	}
-	if r, ok := b.reader.(interface{ PeekSlices(int, [][]byte) [][]byte }); ok {
-		return r.PeekSlices(remaining, parts), nil
-	}
-	return nil, errors.New("reader has no borrowed node view")
-}
-
-func (b *netpollByteBuffer) CanBorrowMessage() bool { return b.captureMarked }
-
-// ConsumedLen includes Skip using the cursor established for a unary message.
-// Legacy ReadLen remains unchanged, and old Skip does not pay for accounting.
-func (b *netpollByteBuffer) ConsumedLen() int {
-	if b.captureMarked {
-		if r, ok := b.reader.(interface{ ConsumedLen(netpoll.ReadMark) int }); ok {
-			return r.ConsumedLen(b.captureMark)
-		}
-	}
-	return b.ReadLen()
 }

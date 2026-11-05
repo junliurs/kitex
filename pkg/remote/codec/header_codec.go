@@ -82,37 +82,6 @@ type ttHeader struct{}
 
 func (t ttHeader) encode(ctx context.Context, message remote.Message, out remote.ByteBuffer) (totalLenField []byte, err error) {
 	tm := message.TransInfo()
-	if reserve, ok := out.(interface{ ReserveFrame(int) error }); ok {
-		data, ok := message.Data().(interface{ BLength() int })
-		if !ok {
-			return nil, fmt.Errorf("frame reservation requires a sized payload")
-		}
-		ints, strings := tm.TransIntInfo(), tm.TransStrInfo()
-		h, ns := 2, 0
-		for k, v := range strings {
-			if k == ttheader.GDPRToken {
-				h += 3 + len(v)
-			} else {
-				ns++
-				h += 4 + len(k) + len(v)
-			}
-		}
-		if ns != 0 {
-			h += 3
-		}
-		if len(ints) != 0 {
-			h += 3
-			for _, v := range ints {
-				h += 4 + len(v)
-			}
-		}
-		h = (h + 3) &^ 3
-		// TTHeader fixed prefix + padded fields + Framed Thrift message envelope.
-		n := 14 + h + 4 + 12 + len(message.RPCInfo().Invocation().MethodName()) + data.BLength()
-		if err = reserve.ReserveFrame(n); err != nil {
-			return nil, err
-		}
-	}
 	if totalLenField, err = ttheader.Encode(ctx, ttheader.EncodeParam{
 		Flags:      getFlags(message),
 		SeqID:      message.RPCInfo().Invocation().SeqID(),

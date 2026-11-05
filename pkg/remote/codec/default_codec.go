@@ -128,7 +128,6 @@ func (c *defaultCodec) EncodePayload(ctx context.Context, message remote.Message
 	if err = c.encodePayload(ctx, message, out); err != nil {
 		return err
 	}
-	message.SetPayloadLen(out.WrittenLen() - headerLen)
 
 	// 3. fill framed field if needed
 	var payloadLen int
@@ -158,19 +157,6 @@ func (c *defaultCodec) EncodeMetaAndPayload(ctx context.Context, message remote.
 
 	var err error
 	var totalLenField []byte
-	if tp == transport.Framed {
-		if reserve, ok := out.(interface{ ReserveFrame(int) error }); ok {
-			data, ok := message.Data().(interface{ BLength() int })
-			if ok {
-				method := message.RPCInfo().Invocation().MethodName()
-				// No TTHeader encoder runs on this path. Reserve the Framed length,
-				// binary Thrift envelope and actual encoded args/result together.
-				if err = reserve.ReserveFrame(4 + 12 + len(method) + data.BLength()); err != nil {
-					return err
-				}
-			}
-		}
-	}
 	// 1. encode header and return totalLenField if needed
 	// totalLenField will be filled after payload encoded
 	if tp&transport.TTHeader == transport.TTHeader {

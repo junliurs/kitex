@@ -65,8 +65,12 @@ func TestUnaryWireMetadata(t *testing.T) {
 				if err := codec.DecodeMeta(ctx, recv, in); err != nil {
 					t.Fatal(err)
 				}
-				if send.PayloadLen() != recv.PayloadLen() {
-					t.Fatalf("payload length send=%d recv=%d", send.PayloadLen(), recv.PayloadLen())
+				prefix := 14 + int(binary.BigEndian.Uint16(wire[12:14]))*4
+				if tp&transport.Framed != 0 {
+					prefix += 4
+				}
+				if wantLen := len(wire) - prefix; recv.PayloadLen() != wantLen {
+					t.Fatalf("payload length recv=%d, want=%d", recv.PayloadLen(), wantLen)
 				}
 				if err := codec.DecodePayload(ctx, recv, &unaryBodyReader{ByteBuffer: in}); err != nil {
 					t.Fatal(err)
