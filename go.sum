@@ -81,6 +81,8 @@ github.com/junliurs/netpoll v0.7.4-0.20261105194019-7e272a7601a0 h1:BvOy/aCN1Z+m
 github.com/junliurs/netpoll v0.7.4-0.20261105194019-7e272a7601a0/go.mod h1:nSVx+fgy/lWkwVJ2fCuorRqkf/DPlaCRm/gmN1WnzkE=
 github.com/junliurs/netpoll v0.7.4-0.20261106012501-5ff953db64dd h1:FtbKTYJLH6ruBzlZHWWg+BaD+Csrmy4Gw3bfWjHHwGg=
 github.com/junliurs/netpoll v0.7.4-0.20261106012501-5ff953db64dd/go.mod h1:nSVx+fgy/lWkwVJ2fCuorRqkf/DPlaCRm/gmN1WnzkE=
+github.com/junliurs/netpoll v0.7.4-0.20261106043848-3a5eb6bbe4cd h1:zk9DTtbUk9Giiz+/aep4XKlSpqEvVsYOpv4RqrKaAqA=
+github.com/junliurs/netpoll v0.7.4-0.20261106043848-3a5eb6bbe4cd/go.mod h1:nSVx+fgy/lWkwVJ2fCuorRqkf/DPlaCRm/gmN1WnzkE=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/cpuid/v2 v2.2.9 h1:66ze0taIn2H33fBvCkXuv9BmCwDfafmiIVpKV9kKGuY=
 github.com/klauspost/cpuid/v2 v2.2.9/go.mod h1:rqkxqrZ1EhYM9G+hXH7YdowN5R5RGN6NK4QwQ3WMXF8=
