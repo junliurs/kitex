@@ -2,8 +2,8 @@ package connpool
 
 import "testing"
 
-func TestShortConnIDNoAlloc(t *testing.T) {
-	for _, c := range []interface{ ConnID() uint64 }{new(shortConn)} {
+func TestConnIDNoAlloc(t *testing.T) {
+	for _, c := range []interface{ ConnID() uint64 }{new(shortConn), new(longConn)} {
 		id := c.ConnID()
 		if id == 0 {
 			t.Fatal("missing connection ID")
