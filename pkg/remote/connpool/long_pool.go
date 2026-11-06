@@ -74,17 +74,6 @@ type longConn struct {
 	sync.RWMutex
 	deadline time.Time
 	address  string
-	id       uint64
-}
-
-// ConnID returns a stable per-connection identity, mirroring shortConn.ConnID:
-// the id is allocated lazily on first use and stays constant while the pooled
-// connection object is reused.
-func (c *longConn) ConnID() uint64 {
-	if c.id == 0 {
-		c.id = remote.NextConnID()
-	}
-	return c.id
 }
 
 // Close implements the net.Conn interface.
